@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+# BirdThing dashboard API: serves recent BirdNET detections + bird photos for the
+# Car Thing 800x480 screen. Reads BirdNET-Pi's SQLite DB; proxies/caches Wikipedia photos.
+import sqlite3, os, json, urllib.request, urllib.parse, threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+DB = "/home/birdpi/BirdNET-Pi/scripts/birds.db"
+HTML = "/opt/birdthing/birdthing-dashboard.html"
+CACHE = "/opt/birdthing/imgcache"
+WCONF = "/opt/birdthing/weather.json"
+PORT = 8090
+os.makedirs(CACHE, exist_ok=True)
+_imglock = threading.Lock()
+
+# WMO weather code -> (emoji icon, short description)
+WMO = {0:("☀️","Clear"),1:("\U0001f324️","Mainly clear"),
+ 2:("⛅","Partly cloudy"),3:("☁️","Overcast"),
+ 45:("\U0001f32b️","Fog"),48:("\U0001f32b️","Rime fog"),
+ 51:("\U0001f326️","Light drizzle"),53:("\U0001f326️","Drizzle"),
+ 55:("\U0001f326️","Heavy drizzle"),56:("\U0001f327️","Freezing drizzle"),
+ 57:("\U0001f327️","Freezing drizzle"),61:("\U0001f327️","Light rain"),
+ 63:("\U0001f327️","Rain"),65:("\U0001f327️","Heavy rain"),
+ 66:("\U0001f327️","Freezing rain"),67:("\U0001f327️","Freezing rain"),
+ 71:("❄️","Light snow"),73:("❄️","Snow"),75:("❄️","Heavy snow"),
+ 77:("❄️","Snow grains"),80:("\U0001f326️","Showers"),
+ 81:("\U0001f327️","Showers"),82:("\U0001f327️","Heavy showers"),
+ 85:("\U0001f328️","Snow showers"),86:("\U0001f328️","Snow showers"),
+ 95:("⛈️","Thunderstorm"),96:("⛈️","Thunderstorm"),
+ 99:("⛈️","Thunderstorm")}
+
+def load_wconf():
+    c = {"lat": 44.6701, "lon": -74.9774, "unit": "C", "place": "Potsdam, NY"}
+    try:
+        c.update(json.load(open(WCONF)))
+    except Exception:
+        pass
+    return c
+
+def save_wconf(c):
+    try:
+        json.dump(c, open(WCONF, "w"))
+    except Exception:
+        pass
+
+def weather():
+    c = load_wconf()
+    try:
+        url = ("https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
+               "&current=temperature_2m,weather_code" % (c["lat"], c["lon"]))
+        req = urllib.request.Request(url, headers={"User-Agent": "BirdThing/1.0"})
+        cur = json.load(urllib.request.urlopen(req, timeout=8))["current"]
+        tc = cur["temperature_2m"]; code = int(cur["weather_code"])
+        temp = tc if c["unit"] == "C" else tc * 9 / 5 + 32
+        icon, desc = WMO.get(code, ("\U0001f321️", "—"))
+        return {"temp": round(temp), "unit": c["unit"], "icon": icon,
+                "desc": desc, "place": c["place"]}
+    except Exception as e:
+        return {"temp": None, "unit": c["unit"], "icon": "\U0001f321️",
+                "desc": "—", "place": c["place"], "err": str(e)}
+
+def geocode(q):
+    try:
+        url = ("https://geocoding-api.open-meteo.com/v1/search?name=%s&count=5"
+               % urllib.parse.quote(q))
+        req = urllib.request.Request(url, headers={"User-Agent": "BirdThing/1.0"})
+        res = json.load(urllib.request.urlopen(req, timeout=8)).get("results", [])
+        out = []
+        for r in res:
+            place = r["name"]
+            if r.get("admin1"): place += ", " + r["admin1"]
+            if r.get("country_code"): place += ", " + r["country_code"]
+            out.append({"place": place, "lat": r["latitude"], "lon": r["longitude"]})
+        return out
+    except Exception:
+        return []
+
+def detections(limit=60):
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % DB, uri=True, timeout=5)
+        cur = con.execute(
+            "SELECT Date,Time,Com_Name,Sci_Name,Confidence FROM detections "
+            "ORDER BY Date DESC, Time DESC LIMIT ?", (limit,))
+        rows = [{"date": r[0], "time": r[1], "com": r[2], "sci": r[3],
+                 "conf": round(r[4], 2)} for r in cur.fetchall()]
+        today = con.execute(
+            "SELECT COUNT(*) , COUNT(DISTINCT Com_Name) FROM detections WHERE Date=?",
+            (rows[0]["date"],)).fetchone() if rows else (0, 0)
+        con.close()
+        return {"rows": rows, "today_count": today[0], "today_species": today[1]}
+    except Exception as e:
+        return {"rows": [], "today_count": 0, "today_species": 0, "err": str(e)}
+
+def by_date(days=7):
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % DB, uri=True, timeout=5)
+        cur = con.execute(
+            "SELECT Date,Com_Name,Sci_Name,COUNT(*) c FROM detections "
+            "GROUP BY Date,Com_Name ORDER BY Date DESC, c DESC")
+        out = []
+        for date, com, sci, c in cur.fetchall():
+            day = next((d for d in out if d["date"] == date), None)
+            if not day:
+                if len(out) >= days:
+                    continue
+                day = {"date": date, "birds": []}; out.append(day)
+            day["birds"].append({"com": com, "sci": sci, "count": c})
+        con.close()
+        return out
+    except Exception as e:
+        return []
+
+def stats():
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % DB, uri=True, timeout=5)
+        today = con.execute("SELECT MAX(Date) FROM detections").fetchone()[0]
+        hourly = [0] * 24
+        for hr, c in con.execute(
+                "SELECT CAST(substr(Time,1,2) AS INT) h,COUNT(*) FROM detections "
+                "WHERE Date=? GROUP BY h", (today,)):
+            if 0 <= hr < 24:
+                hourly[hr] = c
+        top = [{"com": r[0], "count": r[1]} for r in con.execute(
+            "SELECT Com_Name,COUNT(*) c FROM detections WHERE Date=? "
+            "GROUP BY Com_Name ORDER BY c DESC LIMIT 5", (today,))]
+        total = con.execute("SELECT COUNT(*) FROM detections WHERE Date=?", (today,)).fetchone()[0]
+        species = con.execute("SELECT COUNT(DISTINCT Com_Name) FROM detections WHERE Date=?", (today,)).fetchone()[0]
+        alltime = con.execute("SELECT COUNT(*) FROM detections").fetchone()[0]
+        con.close()
+        return {"hourly": hourly, "top": top, "total": total, "species": species, "alltime": alltime}
+    except Exception as e:
+        return {"hourly": [0]*24, "top": [], "total": 0, "species": 0, "alltime": 0}
+
+def fetch_info(name):
+    safe = "".join(c for c in name if c.isalnum() or c in " -").strip()
+    path = os.path.join(CACHE, safe + ".json")
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        try:
+            return json.load(open(path))
+        except Exception:
+            pass
+    try:
+        api = ("https://en.wikipedia.org/api/rest_v1/page/summary/" +
+               urllib.parse.quote(name.replace(" ", "_")))
+        req = urllib.request.Request(api, headers={"User-Agent": "BirdThing/1.0"})
+        meta = json.load(urllib.request.urlopen(req, timeout=8))
+        out = {"extract": meta.get("extract", ""),
+               "title": meta.get("title", name)}
+        with open(path, "w") as f:
+            json.dump(out, f)
+        return out
+    except Exception as e:
+        return {"extract": "", "title": name, "err": str(e)}
+
+def fetch_image(name):
+    safe = "".join(c for c in name if c.isalnum() or c in " -").strip()
+    path = os.path.join(CACHE, safe + ".jpg")
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return path
+    with _imglock:
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            return path
+        try:
+            api = ("https://en.wikipedia.org/api/rest_v1/page/summary/" +
+                   urllib.parse.quote(name.replace(" ", "_")))
+            req = urllib.request.Request(api, headers={"User-Agent": "BirdThing/1.0"})
+            meta = json.load(urllib.request.urlopen(req, timeout=8))
+            url = meta.get("thumbnail", {}).get("source") or \
+                  meta.get("originalimage", {}).get("source")
+            if url:
+                req2 = urllib.request.Request(url, headers={"User-Agent": "BirdThing/1.0"})
+                data = urllib.request.urlopen(req2, timeout=8).read()
+                with open(path, "wb") as f:
+                    f.write(data)
+                return path
+        except Exception:
+            pass
+    return None
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def _send(self, code, ctype, body):
+        self.send_response(code); self.send_header("Content-Type", ctype)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body))); self.end_headers()
+        self.wfile.write(body)
+    def do_GET(self):
+        if self.path == "/" or self.path.startswith("/index"):
+            try:
+                with open(HTML, "rb") as f: self._send(200, "text/html", f.read())
+            except Exception as e:
+                self._send(500, "text/plain", str(e).encode())
+        elif self.path.startswith("/api/detections"):
+            self._send(200, "application/json", json.dumps(detections()).encode())
+        elif self.path.startswith("/api/bydate"):
+            self._send(200, "application/json", json.dumps(by_date()).encode())
+        elif self.path.startswith("/api/stats"):
+            self._send(200, "application/json", json.dumps(stats()).encode())
+        elif self.path.startswith("/api/info"):
+            q = urllib.parse.urlparse(self.path).query
+            name = urllib.parse.parse_qs(q).get("name", [""])[0]
+            self._send(200, "application/json", json.dumps(fetch_info(name)).encode())
+        elif self.path.startswith("/api/weather/unit"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            c = load_wconf(); c["unit"] = "F" if q.get("u", ["C"])[0].upper() == "F" else "C"
+            save_wconf(c)
+            self._send(200, "application/json", json.dumps(weather()).encode())
+        elif self.path.startswith("/api/weather/loc"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            c = load_wconf()
+            try:
+                c["lat"] = float(q["lat"][0]); c["lon"] = float(q["lon"][0])
+                c["place"] = q.get("place", [c["place"]])[0]; save_wconf(c)
+            except Exception:
+                pass
+            self._send(200, "application/json", json.dumps(weather()).encode())
+        elif self.path.startswith("/api/weather"):
+            self._send(200, "application/json", json.dumps(weather()).encode())
+        elif self.path.startswith("/api/geocode"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, "application/json",
+                       json.dumps(geocode(q.get("q", [""])[0])).encode())
+        elif self.path.startswith("/assets/"):
+            fn = os.path.basename(urllib.parse.urlparse(self.path).path)
+            fp = os.path.join("/opt/birdthing/assets", fn)
+            if os.path.exists(fp) and "/" not in fn.replace("..", ""):
+                ct = "font/woff2" if fn.endswith(".woff2") else "application/octet-stream"
+                with open(fp, "rb") as f:
+                    self.send_response(200); self.send_header("Content-Type", ct)
+                    self.send_header("Cache-Control", "max-age=86400")
+                    body = f.read(); self.send_header("Content-Length", str(len(body)))
+                    self.end_headers(); self.wfile.write(body)
+            else:
+                self._send(404, "text/plain", b"no asset")
+        elif self.path.startswith("/api/image"):
+            q = urllib.parse.urlparse(self.path).query
+            name = urllib.parse.parse_qs(q).get("name", [""])[0]
+            p = fetch_image(name) if name else None
+            if p:
+                with open(p, "rb") as f: self._send(200, "image/jpeg", f.read())
+            else:
+                self._send(404, "text/plain", b"no image")
+        else:
+            self._send(404, "text/plain", b"not found")
+
+if __name__ == "__main__":
+    ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()
