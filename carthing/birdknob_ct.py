@@ -30,6 +30,10 @@ def control_server():
                 else:
                     try: os.remove("/tmp/display_off")
                     except OSError: pass
+            elif self.path.startswith("/reboot"):
+                os.system("sudo systemctl reboot")
+            elif self.path.startswith("/poweroff"):
+                os.system("sudo systemctl poweroff")
             self.send_response(200); self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers(); self.wfile.write(b"ok")
     try:
@@ -47,11 +51,9 @@ def button_watch():
                     if not d or len(d) < EVENT_SIZE:
                         continue
                     _, _, etype, code, value = struct.unpack(EVENT_FORMAT, d)
-                    if etype == 1 and code == BTN_M and value == 1:   # EV_KEY keydown
-                        if os.path.exists(DISPLAY_FLAG):
-                            os.remove(DISPLAY_FLAG)
-                        else:
-                            open(DISPLAY_FLAG, "w").close()
+                    # 'm' is now owned by the dashboard JS (short=screen off/wake,
+                    # long=power menu via the /display, /reboot, /poweroff endpoints).
+                    _ = (etype, code, value)
         except Exception:
             time.sleep(2)
 
