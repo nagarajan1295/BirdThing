@@ -140,6 +140,36 @@ def stats():
     except Exception as e:
         return {"hourly": [0]*24, "top": [], "total": 0, "species": 0, "alltime": 0}
 
+XCKEY_FILE = "/opt/birdthing/xenocanto.key"
+
+def _xckey():
+    try:
+        return open(XCKEY_FILE).read().strip()
+    except Exception:
+        return os.environ.get("XC_KEY", "").strip()
+
+def song(name):
+    # Find a bird-call recording via the Xeno-canto API v3 (needs a free API key, since Oct 2025).
+    # Put the key in /opt/birdthing/xenocanto.key (get it at https://xeno-canto.org/account).
+    key = _xckey()
+    if not key:
+        return {"url": "", "err": "no-key"}
+    try:
+        url = ("https://xeno-canto.org/api/3/recordings?query=" +
+               urllib.parse.quote(name) + "&key=" + urllib.parse.quote(key))
+        req = urllib.request.Request(url, headers={"User-Agent": "BirdThing/1.0"})
+        recs = json.load(urllib.request.urlopen(req, timeout=8)).get("recordings", [])
+        for r in recs:
+            f = r.get("file")
+            if f:
+                if f.startswith("//"):
+                    f = "https:" + f
+                return {"url": f}
+        return {"url": ""}
+    except Exception as e:
+        return {"url": "", "err": str(e)}
+
+
 def fetch_info(name):
     safe = "".join(c for c in name if c.isalnum() or c in " -").strip()
     path = os.path.join(CACHE, safe + ".json")
@@ -205,6 +235,10 @@ class H(BaseHTTPRequestHandler):
             self._send(200, "application/json", json.dumps(by_date()).encode())
         elif self.path.startswith("/api/stats"):
             self._send(200, "application/json", json.dumps(stats()).encode())
+        elif self.path.startswith("/api/song"):
+            q = urllib.parse.urlparse(self.path).query
+            name = urllib.parse.parse_qs(q).get("name", [""])[0]
+            self._send(200, "application/json", json.dumps(song(name)).encode())
         elif self.path.startswith("/api/info"):
             q = urllib.parse.urlparse(self.path).query
             name = urllib.parse.parse_qs(q).get("name", [""])[0]
