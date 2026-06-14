@@ -36,16 +36,18 @@
     box-shadow:0 0 0 0 rgba(48,209,88,.5);animation:pulse 2s infinite;}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(48,209,88,.45);}70%{box-shadow:0 0 0 11px rgba(48,209,88,0);}100%{box-shadow:0 0 0 0 rgba(48,209,88,0);}}
   #clock{color:var(--fg);font-variant-numeric:tabular-nums;}
+  #date{color:var(--sec);}
   /* HERO */
-  .hero{position:relative;margin:6px 10px 14px 16px;border-radius:24px;overflow:hidden;background:#0c0c0e;}
+  .hero{position:relative;margin:6px 10px 14px 16px;border-radius:24px;overflow:hidden;background:#0c0c0e;
+    display:flex;flex-direction:column;}
   .hero .bg{position:absolute;inset:0;background-size:cover;background-position:center;
     filter:blur(34px) brightness(.4);transform:scale(1.25);}
-  .hero .photo{position:absolute;left:0;right:0;top:0;bottom:128px;background-size:contain;
+  .hero .photo{position:relative;flex:1;min-height:0;background-size:contain;
     background-repeat:no-repeat;background-position:center;transition:opacity .45s ease;}
   .hero .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
     justify-content:center;gap:14px;color:var(--sec);}
   .hero .empty .big{font-size:64px;}
-  .hero .meta{position:absolute;left:0;right:0;bottom:0;padding:22px 24px 22px;
+  .hero .meta{position:relative;flex-shrink:0;padding:18px 24px 20px;
     background:linear-gradient(0deg,rgba(0,0,0,.92),rgba(0,0,0,.55) 55%,transparent);}
   .hero .com{font-size:calc(42px*var(--ts));font-weight:700;line-height:1.04;letter-spacing:-.02em;}
   .hero .sci{font-size:19px;font-weight:400;color:#c7c7cc;font-style:italic;margin-top:5px;}
@@ -132,8 +134,9 @@
   #live .rec{display:flex;align-items:center;gap:10px;color:#ff453a;font-size:18px;font-weight:600;}
   #live .recdot{width:14px;height:14px;border-radius:50%;background:#ff453a;animation:pulse2 1.3s infinite;}
   @keyframes pulse2{0%,100%{opacity:1}50%{opacity:.25}}
-  #live .lphoto{width:300px;height:230px;object-fit:contain;border-radius:20px;background:var(--card);}
-  #live .lname{font-size:calc(40px*var(--ts));font-weight:700;letter-spacing:-.02em;}
+  #live .lphoto{width:210px;height:160px;object-fit:contain;border-radius:18px;background:var(--card);}
+  #live .lname{font-size:calc(32px*var(--ts));font-weight:700;letter-spacing:-.02em;line-height:1.05;
+    white-space:normal;text-align:center;padding:0 16px;max-width:96%;}
   #live .lsci{font-size:19px;font-style:italic;color:var(--sec);}
   #live .lconf{font-size:17px;color:var(--sec);margin-top:2px;}
   #live .lwait{font-size:22px;color:var(--sec);}
@@ -151,13 +154,21 @@
   .xax span{flex:1;text-align:center;font-size:11px;color:var(--sec);}
   .about{font-size:17px;color:var(--sec);line-height:1.7;padding:10px 6px;}
   .about b{color:var(--fg);font-weight:600;}
+  /* power menu (long-press m) */
+  .pwr{position:fixed;inset:0;background:rgba(0,0,0,.78);display:none;align-items:center;
+    justify-content:center;z-index:40;backdrop-filter:blur(8px);}
+  .pwr.show{display:flex;}
+  .pwrbox{background:#1c1c1e;border-radius:24px;padding:22px;display:flex;flex-direction:column;gap:11px;width:320px;}
+  .pwrt{font-size:22px;font-weight:700;text-align:center;margin-bottom:4px;}
+  .pwrbtn{font-size:20px;font-weight:600;text-align:center;padding:15px;border-radius:14px;background:var(--card2);}
+  .pwrbtn.alt{color:var(--sec);background:var(--card);}
 </style>
 </head>
 <body>
 <div id="app">
   <div class="top">
     <div class="wx" id="wx" onclick="openWx()"><span id="wxIcon">🌡️</span><span id="wxTemp">--°</span></div>
-    <div class="tr"><div class="live"><div class="dot"></div><span>Live</span></div><div id="clock">--:--</div></div>
+    <div class="tr"><div id="date"></div><div class="live"><div class="dot"></div><span>Live</span></div><div id="clock">--:--</div></div>
   </div>
   <div class="hero" id="hero">
     <div class="bg" id="heroBg"></div>
@@ -206,6 +217,7 @@
   <div class="vhead"><div class="vtitle">Live</div><div class="vclose" onclick="closeView('live')">Back</div></div>
   <div class="lwrap">
     <div class="rec"><div class="recdot"></div><span>Recording &amp; identifying…</span></div>
+    <canvas id="spec" width="720" height="150" style="width:720px;height:150px;border-radius:14px;background:var(--card)"></canvas>
     <img class="lphoto" id="liveImg" alt="">
     <div class="lname" id="liveName">—</div>
     <div class="lsci" id="liveSci"></div>
@@ -229,12 +241,41 @@
     <div class="about" id="about"></div>
   </div>
 </div>
+<div id="power" class="pwr"><div class="pwrbox">
+  <div class="pwrt">Power</div>
+  <div class="pwrbtn" onclick="doReboot()">↻ Restart</div>
+  <div class="pwrbtn" onclick="doPowerOff()">⏻ Power off</div>
+  <div class="pwrbtn alt" onclick="closePower()">Cancel</div>
+</div></div>
 <script>
 const VERSION="1.0 (USB)";
+const CT="http://127.0.0.1:8091";
+// 'm' (5th top button): short press = screen off / wake; long press = power menu.
+let dispOff=false, mTimer=null, mHandled=false;
+function setDisplay(on){dispOff=!on;fetch(CT+"/display?on="+(on?1:0)).catch(()=>{});}
+function powerOpen(){return document.getElementById('power').classList.contains('show');}
+function openPower(){document.getElementById('power').classList.add('show');}
+function closePower(){document.getElementById('power').classList.remove('show');}
+function doReboot(){closePower();fetch(CT+"/reboot").catch(()=>{});}
+function doPowerOff(){closePower();setDisplay(false);}
 const IMG=n=>"/api/image?name="+encodeURIComponent(n);
 let rows=[],sel=0,follow=true,factsOpen=false;
-function tick(){const d=new Date();document.getElementById('clock').textContent=d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
+// Clock/date come from the Pi (authoritative NTP time): the Car Thing has no RTC/NTP
+// and a wrong system clock + timezone, so we never trust the browser's local Date.
+const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let srvOffMs=null;            // server-UTC minus local Date.now()
+let tzOffMin=-(new Date().getTimezoneOffset()); // until first server sync
+function setSrvTime(nowMs,tzoff){srvOffMs=nowMs-Date.now();if(typeof tzoff==='number')tzOffMin=tzoff;}
+function tick(){
+  const base=(srvOffMs!=null?Date.now()+srvOffMs:Date.now())+tzOffMin*60000;
+  const d=new Date(base); // shifted so UTC getters read Pi-local wall clock
+  let h=d.getUTCHours();const ap=h<12?'AM':'PM';const hh=(h%12)||12;
+  document.getElementById('clock').textContent=hh+':'+String(d.getUTCMinutes()).padStart(2,'0')+' '+ap;
+  document.getElementById('date').textContent=DAYS[d.getUTCDay()]+', '+MON[d.getUTCMonth()]+' '+d.getUTCDate();}
 setInterval(tick,1000);tick();
+// detection timestamps -> 12-hour to match the top clock
+function fmt12(t){if(!t)return'';const p=t.split(':'),m=p[1]||'00';let h=+p[0];const ap=h<12?'AM':'PM';h=h%12;if(h===0)h=12;return h+':'+m+' '+ap;}
 function renderHero(){
   const m=document.getElementById('heroMeta'),e=document.getElementById('heroEmpty');
   if(!rows.length){m.style.display='none';e.style.display='flex';return;}
@@ -243,7 +284,7 @@ function renderHero(){
   document.getElementById('heroCom').textContent=b.com;
   document.getElementById('heroSci').textContent=b.sci||'';
   document.getElementById('heroConf').textContent=Math.round(b.conf*100)+'%';
-  document.getElementById('heroWhen').textContent=b.time.slice(0,5)+(follow&&sel===0?' · Live':'');
+  document.getElementById('heroWhen').textContent=fmt12(b.time)+(follow&&sel===0?' · Live':'');
   const url=IMG(b.com);
   document.getElementById('heroPhoto').style.backgroundImage=`url('${url}')`;
   document.getElementById('heroBg').style.backgroundImage=`url('${url}')`;
@@ -253,7 +294,7 @@ function renderList(){
   rows.forEach((x,i)=>{
     const it=document.createElement('div');it.className='item'+(i===sel?' sel':'');
     it.innerHTML=`<img class="th" src="${IMG(x.com)}" onerror="this.style.visibility='hidden'">
-      <div class="info"><div class="nm">${x.com}</div><div class="tm">${x.time.slice(0,5)}</div></div>
+      <div class="info"><div class="nm">${x.com}</div><div class="tm">${fmt12(x.time)}</div></div>
       <div class="cf">${Math.round(x.conf*100)}%</div>`;
     it.onclick=()=>{sel=i;follow=(i===0);renderHero();renderList();openFacts();};
     L.appendChild(it);
@@ -263,9 +304,13 @@ function renderList(){
 async function refresh(){
   try{
     const d=await (await fetch('/api/detections',{cache:'no-store'})).json();
+    if(d.now)setSrvTime(d.now,d.tzoff);
     document.getElementById('stCount').textContent=d.today_count||0;
     document.getElementById('stSpecies').textContent=d.today_species||0;
-    rows=d.rows||[];
+    const nr=d.rows||[];
+    const nk=nr.length?nr[0].time+nr[0].com:'';
+    if(nk&&nk!==lastLiveKey){lastLiveKey=nk;specEnergy=1;}   // fresh ID -> pulse spectrogram
+    rows=nr;
     if(follow)sel=0;
     if(document.getElementById('live').classList.contains('show'))renderLive();
     if(!curOverlay()){renderHero();renderList();}
@@ -296,14 +341,22 @@ function closeFacts(){factsOpen=false;document.getElementById('facts').classList
 document.getElementById('facts').onclick=(e)=>{if(e.target.id==='facts')closeFacts();};
 function factsScroll(d){document.getElementById('fBody').scrollBy({top:d*90,behavior:'smooth'});}
 function btnNav(k){ // top buttons 1-4 switch views from anywhere
-  if(k==='1'){closeAllOverlays();openFacts();return true;}
-  if(k==='2'){openGallery();return true;}
-  if(k==='3'){openLive();return true;}
-  if(k==='4'){openSettings();return true;}
+  const cur=curOverlay();
+  if(k==='1'){cur?closeAllOverlays():openFacts();return true;}
+  if(k==='2'){cur==='gallery'?closeAllOverlays():openGallery();return true;}
+  if(k==='3'){cur==='live'?closeAllOverlays():openLive();return true;}
+  if(k==='4'){cur==='settings'?closeAllOverlays():openSettings();return true;}
   return false;
 }
 document.addEventListener('keydown',(ev)=>{
   const k=ev.key;
+  if(powerOpen()){if(k==='Escape'||k==='Backspace')closePower();return;}
+  if(k==='m'||k==='M'){
+    if(ev.repeat)return;
+    if(dispOff){setDisplay(true);mHandled=true;return;}   // wake
+    mHandled=false;clearTimeout(mTimer);mTimer=setTimeout(()=>{mHandled=true;openPower();},650);
+    return;
+  }
   if(document.getElementById('wxset').classList.contains('show')){if(k==='Escape'||k==='Backspace')closeWx();return;}
   if(btnNav(k))return;
   if(factsOpen){
@@ -324,6 +377,12 @@ document.addEventListener('keydown',(ev)=>{
   else if(k==='ArrowUp'||k==='ArrowLeft')move(-1);
   else if(k==='Enter')openFacts();
   else if(k==='Escape'||k==='Backspace')goLive();
+});
+document.addEventListener('keyup',(ev)=>{
+  if(ev.key!=='m'&&ev.key!=='M')return;
+  clearTimeout(mTimer);
+  if(mHandled){mHandled=false;return;}
+  setDisplay(false);   // short press = screen off
 });
 // ---- Views (gallery / live / settings) ----
 function closeAllOverlays(){closeFacts();['gallery','live','settings'].forEach(id=>document.getElementById(id).classList.remove('show'));}
@@ -350,7 +409,23 @@ async function openGallery(){openView('gallery');
     if(!days.length)b.innerHTML='<div class="about">No birds yet today.</div>';
   }catch(e){b.innerHTML='<div class="about">Could not load.</div>';}
 }
-function openLive(){openView('live');renderLive();}
+let specEnergy=0, specRAF=0, lastLiveKey='';
+function specLoop(){
+  const cv=document.getElementById('spec'); if(!cv){specRAF=0;return;}
+  if(!document.getElementById('live').classList.contains('show')){specRAF=0;return;}
+  const x=cv.getContext('2d'),W=cv.width,H=cv.height;
+  const img=x.getImageData(2,0,W-2,H); x.clearRect(0,0,W,H); x.putImageData(img,0,0);
+  specEnergy*=0.97;                          // decays; bumps on a fresh detection
+  const base=0.34+specEnergy*1.4, n=10, cx=W-2;
+  for(let i=0;i<n;i++){
+    const amp=(Math.sin(Date.now()/170+i*1.3)*0.4+0.6)*base*(0.5+Math.random()*0.5);
+    const h=Math.min(H, amp*H), y=(H-h)/2;
+    x.fillStyle='rgba(48,209,88,'+(0.4+amp*0.6).toFixed(2)+')';
+    x.fillRect(cx, y+i*(h/n*0), Math.random()*2+1, h);
+  }
+  specRAF=requestAnimationFrame(specLoop);
+}
+function openLive(){openView('live');renderLive();specEnergy=0.9;if(!specRAF)specLoop();}
 function renderLive(){
   if(!rows.length){document.getElementById('liveName').textContent='Listening…';
     document.getElementById('liveSci').textContent='';document.getElementById('liveConf').textContent='';
@@ -358,7 +433,7 @@ function renderLive(){
   const b=rows[0];
   document.getElementById('liveName').textContent=b.com;
   document.getElementById('liveSci').textContent=b.sci||'';
-  document.getElementById('liveConf').textContent='confidence '+Math.round(b.conf*100)+'% · '+b.time.slice(0,5);
+  document.getElementById('liveConf').textContent='confidence '+Math.round(b.conf*100)+'% · '+fmt12(b.time);
   const img=document.getElementById('liveImg');img.style.visibility='visible';img.src=IMG(b.com);
 }
 async function openSettings(){openView('settings');markSettings();renderStats();

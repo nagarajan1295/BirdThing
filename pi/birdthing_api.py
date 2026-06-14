@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # BirdThing dashboard API: serves recent BirdNET detections + bird photos for the
 # Car Thing 800x480 screen. Reads BirdNET-Pi's SQLite DB; proxies/caches Wikipedia photos.
-import sqlite3, os, json, urllib.request, urllib.parse, threading
+import sqlite3, os, json, urllib.request, urllib.parse, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DB = "/home/birdpi/BirdNET-Pi/scripts/birds.db"
@@ -74,6 +74,14 @@ def geocode(q):
     except Exception:
         return []
 
+def tz_off_min():
+    # Pi local UTC offset in minutes east of UTC (e.g. EDT = -240). The Car Thing
+    # has no RTC/NTP and a wrong clock+TZ, so the dashboard renders time from this.
+    is_dst = time.localtime().tm_isdst > 0
+    secs_west = time.altzone if is_dst else time.timezone
+    return -secs_west // 60
+
+
 def detections(limit=60):
     try:
         con = sqlite3.connect("file:%s?mode=ro" % DB, uri=True, timeout=5)
@@ -86,9 +94,11 @@ def detections(limit=60):
             "SELECT COUNT(*) , COUNT(DISTINCT Com_Name) FROM detections WHERE Date=?",
             (rows[0]["date"],)).fetchone() if rows else (0, 0)
         con.close()
-        return {"rows": rows, "today_count": today[0], "today_species": today[1]}
+        return {"rows": rows, "today_count": today[0], "today_species": today[1],
+                "now": int(time.time() * 1000), "tzoff": tz_off_min()}
     except Exception as e:
-        return {"rows": [], "today_count": 0, "today_species": 0, "err": str(e)}
+        return {"rows": [], "today_count": 0, "today_species": 0, "err": str(e),
+                "now": int(time.time() * 1000), "tzoff": tz_off_min()}
 
 def by_date(days=7):
     try:
