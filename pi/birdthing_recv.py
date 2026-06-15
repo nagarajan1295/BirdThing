@@ -11,8 +11,8 @@ LOOPDEV = "hw:Loopback,0,0"
 RATE = 48000
 HP, LP = 350.0, 12000.0
 N, H = 1024, 256            # frame, hop (75% overlap)
-GATE_BETA = 1.5            # noise over-subtraction factor
-GATE_FLOOR = 0.18         # min gain (~-15 dB) -> never destroys onsets / quiet birds
+GATE_BETA = 0.0            # spectral gate OFF (=bandpass only) — avoids distortion that can cause
+GATE_FLOOR = 0.18         # mis-IDs; raise BETA to ~1.5 to re-enable spectral noise subtraction
 
 OK = True
 try:

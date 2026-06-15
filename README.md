@@ -32,12 +32,28 @@ Car Thing PDM mic ──(capture+gain, Python/ALSA)──► TCP ──► Raspb
 - The Car Thing's **knob, buttons, touchscreen, ambient‑light sensor and backlight** are all wired
   in (scroll/select, view switching, auto‑brightness, screen on/off).
 
+## Identification quality & signal processing
+
+Tuned for fast, precise IDs (BirdNET is from the same Cornell lab behind Merlin):
+
+- **Low latency** — 3‑second analysis windows + a 1‑second dashboard refresh → IDs in ~3–4 s.
+- **Noise reduction** — the Pi receiver applies a gentle bandpass (350 Hz–12 kHz) to cut wind,
+  traffic and AC hum that mask distant birds; optional spectral noise‑gating is built in.
+- **Precision** — location/season filtering + a tuned confidence threshold cut false IDs without
+  dropping real detections.
+- **Accessibility** — Small→XXL text scaling (enlarges every label), knob‑navigable settings,
+  brightness control, and tap‑to‑open Wikipedia facts with a ▶ play‑call button (Xeno‑canto) on
+  builds that have audio out.
+- **Planned** — a background analytics pass over stored detection clips (audio quality vs. ID rate)
+  to auto‑tune the pipeline. *Model self‑retraining is out of scope, and "100% / zero‑latency" isn't
+  physically achievable — this is tuned to the practical limit.*
+
 ## Versions
 
 | Version | Link between Car Thing & Pi | Status |
 |---|---|---|
 | **v1.0 (USB)** | USB (RNDIS networking over the cable) | ✅ Working — this repo |
-| **v2.0 (Bluetooth)** | Bluetooth PAN (no cable) | 🚧 In progress — see [docs/BLUETOOTH.md](docs/BLUETOOTH.md) |
+| **v2.0 (Bluetooth)** | Bluetooth PAN (no cable) | ⏸️ Parked — this Car Thing unit's bootloader won't hand off to a BT‑capable image (see [docs/BLUETOOTH.md](docs/BLUETOOTH.md)); **USB is the supported link** |
 
 ---
 
