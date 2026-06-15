@@ -6,7 +6,8 @@ SENSOR="/sys/bus/iio/devices/iio:device0/in_illuminance0_input"
 BACKLIGHT="/sys/class/backlight/aml-bl/brightness"
 FLAG="/tmp/display_off"
 MODEF="/tmp/bt_bright"
-MIN=18; MAX=255
+MIN=90; MAX=255   # floor raised: the tmd2772 ambient sensor reads 0 on this unit, so auto used to
+                  # pin the screen at a too-dim 18; 90 keeps it readable. 'm' button still blanks it.
 cur=-1
 while :; do
   if [ -f "$FLAG" ]; then

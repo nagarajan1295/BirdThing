@@ -49,7 +49,7 @@
   .hero .empty .big{font-size:64px;}
   .hero .meta{position:relative;flex-shrink:0;padding:18px 24px 20px;
     background:linear-gradient(0deg,rgba(0,0,0,.92),rgba(0,0,0,.55) 55%,transparent);}
-  .hero .com{font-size:calc(42px*var(--ts));font-weight:700;line-height:1.04;letter-spacing:-.02em;}
+  .hero .com{font-size:calc(42px*min(var(--ts),1.5));font-weight:700;line-height:1.04;letter-spacing:-.02em;}
   .hero .sci{font-size:calc(19px*var(--ts));font-weight:400;color:#c7c7cc;font-style:italic;margin-top:5px;}
   .hero .row{display:flex;align-items:center;gap:13px;margin-top:15px;}
   .pill{background:rgba(255,255,255,.16);backdrop-filter:blur(10px);font-size:calc(16px*var(--ts));font-weight:600;
@@ -73,7 +73,7 @@
   .item .tm{font-size:calc(14px*var(--ts));color:var(--sec);font-weight:400;margin-top:2px;}
   .item .cf{font-size:calc(17px*var(--ts));color:var(--sec);font-weight:600;}
   /* FACTS */
-  #facts{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;z-index:10;
+  #facts{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;z-index:25;
     opacity:0;visibility:hidden;transform:scale(1.015);
     transition:opacity .26s ease,transform .26s ease,visibility .26s;}
   #facts.show{opacity:1;visibility:visible;transform:none;}
@@ -147,11 +147,12 @@
   #live .lconf{font-size:calc(17px*var(--ts));color:var(--sec);margin-top:2px;}
   #live .lwait{font-size:22px;color:var(--sec);}
   /* settings */
-  .srow{display:flex;align-items:center;gap:14px;padding:14px 6px;border-bottom:1px solid var(--hair);}
-  .srow .sk{font-size:19px;font-weight:600;flex:1;}
-  .seg2{display:flex;background:var(--card);border-radius:12px;padding:3px;}
-  .seg2 button{background:transparent;color:var(--fg);border:none;font-size:17px;font-weight:600;
-    padding:8px 18px;border-radius:9px;font-family:inherit;}
+  .srow{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:16px 6px;border-bottom:1px solid var(--hair);}
+  .srow .sk{font-size:calc(19px*var(--ts));font-weight:600;}
+  .seg2{display:flex;flex-wrap:wrap;background:var(--card);border-radius:12px;padding:4px;gap:4px;}
+  .seg2 button{background:transparent;color:var(--fg);border:none;font-size:calc(17px*var(--ts));font-weight:600;
+    padding:13px 24px;border-radius:9px;font-family:inherit;}
+  .khi{outline:3px solid var(--green);outline-offset:1px;}
   .seg2 button.on{background:var(--card2);}
   .chart{display:flex;align-items:flex-end;gap:3px;height:120px;padding:10px 6px 0;}
   .chart .bar{flex:1;background:var(--green);border-radius:4px 4px 0 0;min-height:2px;opacity:.85;}
@@ -171,7 +172,7 @@
     <div class="wx" id="wx" onclick="openWx()"><span id="wxIcon">🌡️</span><span id="wxTemp">--°</span></div>
     <div class="tr"><div id="date"></div><div class="live"><div class="dot"></div><span>Live</span></div><div id="clock">--:--</div></div>
   </div>
-  <div class="hero" id="hero">
+  <div class="hero" id="hero" onclick="openFacts()">
     <div class="bg" id="heroBg"></div>
     <div class="photo" id="heroPhoto"></div>
     <div class="empty" id="heroEmpty"><div class="big">🐦</div><div>Listening…</div></div>
@@ -231,7 +232,7 @@
   <div class="vhead"><div class="vtitle">Settings</div><div class="vclose" onclick="closeView('settings')">Back</div></div>
   <div class="vbody">
     <div class="srow"><span class="sk">Text size</span>
-      <div class="seg2"><button onclick="setTs(0.9)" data-ts="0.9">Small</button><button onclick="setTs(1)" data-ts="1">Medium</button><button onclick="setTs(1.15)" data-ts="1.15">Large</button><button onclick="setTs(1.7)" data-ts="1.7">XL</button></div></div>
+      <div class="seg2"><button onclick="setTs(0.9)" data-ts="0.9">Small</button><button onclick="setTs(1)" data-ts="1">Medium</button><button onclick="setTs(1.15)" data-ts="1.15">Large</button><button onclick="setTs(1.7)" data-ts="1.7">XL</button><button onclick="setTs(2.2)" data-ts="2.2">XXL</button></div></div>
     <div class="srow" style="border:none;padding-top:2px"><span class="about" style="padding:0">XL is an accessibility size — enlarges every label (bird name, time, date, weather) to read from across the room.</span></div>
     <div class="srow"><span class="sk">Appearance</span>
       <div class="seg2"><button onclick="setTheme('dark')" data-th="dark">Dark</button><button onclick="setTheme('light')" data-th="light">Light</button></div></div>
@@ -334,20 +335,20 @@ function playSong(){
     else btn.textContent=(d.err==='no-key')?'Set API key':'No recording';
   }).catch(()=>{btn.textContent='▶ Play call';});
 }
-async function openFacts(){
-  if(!rows.length)return;
-  const b=rows[sel];factsOpen=true;curSci=b.sci||'';curCom=b.com;
+async function openFactsFor(com,sci){
+  factsOpen=true;curCom=com;curSci=sci||'';
   document.getElementById('fPlay').textContent='▶ Play call';
-  document.getElementById('fTitle').textContent=b.com;
-  document.getElementById('fSci').textContent=b.sci||'';
-  document.getElementById('fPhoto').src=IMG(b.com);
+  document.getElementById('fTitle').textContent=com;
+  document.getElementById('fSci').textContent=sci||'';
+  document.getElementById('fPhoto').src=IMG(com);
   document.getElementById('fBody').textContent='Loading…';
   document.getElementById('facts').classList.add('show');
   try{
-    const info=await (await fetch('/api/info?name='+encodeURIComponent(b.com))).json();
+    const info=await (await fetch('/api/info?name='+encodeURIComponent(com))).json();
     document.getElementById('fBody').textContent=info.extract||'No facts available for this bird.';
   }catch(e){document.getElementById('fBody').textContent='No facts available (offline).';}
 }
+function openFacts(){if(!rows.length)return;const b=rows[sel];openFactsFor(b.com,b.sci);}
 function closeFacts(){factsOpen=false;document.getElementById('facts').classList.remove('show');
   const au=document.getElementById('songAudio');try{au.pause();au.removeAttribute('src');}catch(e){}}
 document.getElementById('facts').onclick=(e)=>{if(e.target.id==='facts')closeFacts();};
@@ -373,6 +374,13 @@ document.addEventListener('keydown',(ev)=>{
   }
   const v=curOverlay();
   if(v){
+    if(v==='settings'){
+      if(k==='ArrowDown'||k==='ArrowRight')setMove(1);
+      else if(k==='ArrowUp'||k==='ArrowLeft')setMove(-1);
+      else if(k==='Enter'){const o=setOpts()[setSel];if(o)o.click();}
+      else if(k==='Escape'||k==='Backspace')closeView('settings');
+      return;
+    }
     const body=document.querySelector('#'+v+' .vbody');
     if(k==='ArrowDown'||k==='ArrowRight'){if(body)body.scrollBy({top:110,behavior:'smooth'});}
     else if(k==='ArrowUp'||k==='ArrowLeft'){if(body)body.scrollBy({top:-110,behavior:'smooth'});}
@@ -403,6 +411,7 @@ async function openGallery(){openView('gallery');
       const grid=document.createElement('div');grid.className='grid';
       d.birds.forEach(x=>{const c=document.createElement('div');c.className='bcard';
         c.innerHTML=`<img src="${IMG(x.com)}" onerror="this.style.visibility='hidden'"><div class="bn">${x.com}</div><div class="bc">${x.count}×</div>`;
+        c.onclick=()=>openFactsFor(x.com,x.sci);
         grid.appendChild(c);});
       box.appendChild(grid);b.appendChild(box);
     });
@@ -436,9 +445,15 @@ function renderLive(){
   document.getElementById('liveConf').textContent='confidence '+Math.round(b.conf*100)+'% · '+fmt12(b.time);
   const img=document.getElementById('liveImg');img.style.visibility='visible';img.src=IMG(b.com);
 }
+// knob/arrow navigation of Settings options (so you don't have to tap toggles near the edge)
+let setSel=0;
+function setOpts(){return Array.from(document.querySelectorAll('#settings .vbody button'));}
+function setHi(){const o=setOpts();o.forEach((b,i)=>b.classList.toggle('khi',i===setSel));const c=o[setSel];if(c)c.scrollIntoView({block:'nearest',behavior:'smooth'});}
+function setMove(d){const o=setOpts();if(!o.length)return;setSel=(setSel+d+o.length)%o.length;setHi();}
 async function openSettings(){openView('settings');markSettings();renderStats();
   document.getElementById('about').innerHTML=
     `BirdThing · version <b>${VERSION}</b><br>Listens for birds with a Spotify Car Thing &amp; BirdNET.<br>Created by <b>Naga</b>.`;
+  setSel=0;setTimeout(setHi,60);
 }
 async function renderStats(){
   try{
