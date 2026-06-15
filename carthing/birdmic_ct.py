@@ -14,7 +14,11 @@ TARGET_PEAK = 9000
 MAX_GAIN = 120
 MIN_GAIN = 1
 NOISE_FLOOR = 25   # raw peak below this is treated as silence (gain held low)
+QUIET_RECOVER_SEC = 20  # if raw stays below NOISE_FLOOR this long the PDM has gone "stuck-quiet"
+                        # (still streaming but ~silent) -> reopen to recover. A healthy mic always
+                        # reads some self-noise (>25), so genuine quiet won't false-trigger badly.
 _gain = [8.0]
+_quiet_since = [None]
 
 a = ctypes.CDLL("libasound.so.2")
 a.snd_pcm_readi.restype = ctypes.c_long
@@ -85,6 +89,21 @@ while _run[0]:
         continue
     mono = array.array('h'); mono.frombytes(b.raw[:n*2])
     peak = max(abs(max(mono)), abs(min(mono))) if n else 0
+    # watchdog for the "stuck-quiet" PDM state: snd_pcm_wait keeps returning data so the normal
+    # stall-reopen never fires, but the data is ~silent. After a sustained quiet run, reopen.
+    nowt = time.time()
+    if peak < NOISE_FLOOR:
+        if _quiet_since[0] is None:
+            _quiet_since[0] = nowt
+        elif nowt - _quiet_since[0] > QUIET_RECOVER_SEC:
+            _quiet_since[0] = None
+            close_pcm()
+            while _run[0] and not open_pcm():
+                close_pcm(); time.sleep(1)
+            _gain[0] = 8.0
+            continue
+    else:
+        _quiet_since[0] = None
     if peak < NOISE_FLOOR:
         desired = MIN_GAIN            # silence: don't amplify the noise floor
     else:
