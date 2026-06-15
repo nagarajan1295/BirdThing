@@ -170,6 +170,55 @@ def song(name):
         return {"url": "", "err": str(e)}
 
 
+def _nm_unesc(s):
+    return s.replace("\\:", ":").replace("\\\\", "\\")
+
+def wifi_status():
+    try:
+        out = subprocess.run(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"],
+                             capture_output=True, text=True, timeout=10).stdout
+        for line in out.splitlines():
+            if line.startswith("yes:"):
+                return {"ssid": _nm_unesc(line[4:])}
+        return {"ssid": ""}
+    except Exception as e:
+        return {"ssid": "", "err": str(e)}
+
+def wifi_scan():
+    try:
+        subprocess.run(["sudo", "nmcli", "dev", "wifi", "rescan"], capture_output=True, timeout=20)
+        out = subprocess.run(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list"],
+                             capture_output=True, text=True, timeout=15).stdout
+        best = {}
+        for line in out.splitlines():
+            p = line.replace("\\:", "\x00").split(":")
+            if len(p) < 2:
+                continue
+            ssid = p[0].replace("\x00", ":")
+            if not ssid:
+                continue
+            try:
+                sig = int(p[1])
+            except Exception:
+                sig = 0
+            sec = len(p) > 2 and p[2] not in ("", "--")
+            if ssid not in best or sig > best[ssid]["signal"]:
+                best[ssid] = {"ssid": ssid, "signal": sig, "secure": sec}
+        return sorted(best.values(), key=lambda x: -x["signal"])[:18]
+    except Exception as e:
+        return []
+
+def wifi_connect(ssid, psk):
+    try:
+        cmd = ["sudo", "nmcli", "dev", "wifi", "connect", ssid]
+        if psk:
+            cmd += ["password", psk]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+        return {"ok": r.returncode == 0, "msg": (r.stdout or r.stderr).strip()[:160]}
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
+
+
 def analytics():
     # Live "today" analytics for the on-screen view: volume, species, and a confidence-based
     # quality proxy (high-confidence vs borderline = likely-false).
@@ -297,6 +346,14 @@ class H(BaseHTTPRequestHandler):
             q = urllib.parse.urlparse(self.path).query
             name = urllib.parse.parse_qs(q).get("name", [""])[0]
             self._send(200, "application/json", json.dumps(song(name)).encode())
+        elif self.path.startswith("/api/wifi/scan"):
+            self._send(200, "application/json", json.dumps(wifi_scan()).encode())
+        elif self.path.startswith("/api/wifi/connect"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, "application/json", json.dumps(
+                wifi_connect(q.get("ssid", [""])[0], q.get("psk", [""])[0])).encode())
+        elif self.path.startswith("/api/wifi"):
+            self._send(200, "application/json", json.dumps(wifi_status()).encode())
         elif self.path.startswith("/api/analytics"):
             self._send(200, "application/json", json.dumps(analytics()).encode())
         elif self.path.startswith("/api/play_pi"):
