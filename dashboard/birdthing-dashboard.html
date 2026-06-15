@@ -242,6 +242,11 @@
       <div class="seg2"><button onclick="openAnalytics()">Open today's report</button></div></div>
     <div class="srow"><span class="sk">Wi‑Fi</span>
       <div class="seg2"><button onclick="openWifi()">Change network</button></div></div>
+    <div class="srow"><span class="sk">Bird region</span>
+      <div class="seg2"><button onclick="detectLoc()">Auto‑detect</button><button onclick="setLoc(40.71,-74.01,'New York')">New York</button><button onclick="setLoc(39.83,-98.58,'North America')">N. America</button><button onclick="setLoc(51.51,-0.13,'UK')">UK</button><button onclick="setLoc(20.59,78.96,'India')">India</button><button onclick="setLoc(-25.27,133.78,'Australia')">Australia</button></div></div>
+    <div class="srow"><span class="sk">Geo filter — precision vs. catch‑all</span>
+      <div class="seg2"><button onclick="setSf(0.03)">Strict</button><button onclick="setSf(0.01)">Loose</button><button onclick="setSf(0)">Off (catch‑all)</button></div>
+      <span class="about" id="locNote" style="padding:4px 4px 0"></span></div>
     <div class="srow" style="border:none;flex-direction:column;align-items:flex-start;gap:8px">
       <span class="sk">Today's activity</span>
       <div class="chart" id="chart" style="width:100%"></div>
@@ -479,9 +484,18 @@ function buildWkb(){const kb=document.getElementById('wkb');kb.innerHTML='';
   r.appendChild(sh);r.appendChild(sp);r.appendChild(bs);kb.appendChild(r);}
 async function wifiConnect(){const cur=document.getElementById('wifiCur');cur.textContent='Connecting to '+wifiSsid+'…';
   try{const r=await (await fetch('/api/wifi/connect?ssid='+encodeURIComponent(wifiSsid)+'&psk='+encodeURIComponent(wpass))).json();
-    cur.innerHTML=r.ok?('Connected to <b>'+wifiSsid+'</b> ✓'):('Failed: '+(r.msg||'error'));
-    if(r.ok)document.getElementById('wifiPanel').style.display='none';
+    cur.innerHTML=r.ok?('Connected to <b>'+wifiSsid+'</b> ✓ — detecting location…'):('Failed: '+(r.msg||'error'));
+    if(r.ok){document.getElementById('wifiPanel').style.display='none';detectLoc();}
   }catch(e){cur.textContent='Connection error';}}
+// Bird region / geographic ID filter
+function setLoc(lat,lon,place){const n=document.getElementById('locNote');n.textContent='Setting region to '+place+'…';
+  fetch('/api/birdloc?lat='+lat+'&lon='+lon+'&place='+encodeURIComponent(place)).then(r=>r.json()).then(d=>{n.textContent=d.ok?('Region: '+place):'Failed to set region';}).catch(()=>{n.textContent='Error';});}
+function detectLoc(){const n=document.getElementById('locNote');if(n)n.textContent='Detecting location…';
+  fetch('/api/geoip').then(r=>r.json()).then(g=>{if(g.lat==null){if(n)n.textContent='Could not detect location';return;}
+    fetch('/api/birdloc?lat='+g.lat+'&lon='+g.lon+'&place='+encodeURIComponent(g.place)).then(r=>r.json()).then(d=>{if(n)n.textContent=d.ok?('Region: '+g.place):'Failed';});
+  }).catch(()=>{if(n)n.textContent='Error';});}
+function setSf(t){const n=document.getElementById('locNote');const lbl=t==0?'Off (catch‑all)':(t<0.02?'Loose':'Strict');
+  fetch('/api/sf?t='+t).then(r=>r.json()).then(d=>{n.textContent='Geo filter: '+lbl+' — restarting analysis…';}).catch(()=>{n.textContent='Error';});}
 async function openAnalytics(){openView('analytics');
   const b=document.getElementById('anBody');b.innerHTML='Loading…';
   try{
