@@ -238,6 +238,8 @@
       <div class="seg2"><button onclick="setTheme('dark')" data-th="dark">Dark</button><button onclick="setTheme('light')" data-th="light">Light</button></div></div>
     <div class="srow"><span class="sk">Screen brightness</span>
       <div class="seg2"><button onclick="setBright('auto')" data-br="auto">Auto</button><button onclick="setBright('low')" data-br="low">Low</button><button onclick="setBright('mid')" data-br="mid">Mid</button><button onclick="setBright('high')" data-br="high">High</button></div></div>
+    <div class="srow"><span class="sk">Analytics</span>
+      <div class="seg2"><button onclick="openAnalytics()">Open today's report</button></div></div>
     <div class="srow" style="border:none;flex-direction:column;align-items:flex-start;gap:8px">
       <span class="sk">Today's activity</span>
       <div class="chart" id="chart" style="width:100%"></div>
@@ -245,6 +247,10 @@
     </div>
     <div class="about" id="about"></div>
   </div>
+</div>
+<div id="analytics" class="view">
+  <div class="vhead"><div class="vtitle">Analytics</div><div class="vclose" onclick="closeView('analytics')">Back</div></div>
+  <div class="vbody" id="anBody">Loading…</div>
 </div>
 <script>
 const VERSION="1.0 (USB)";
@@ -393,10 +399,10 @@ document.addEventListener('keydown',(ev)=>{
   else if(k==='Escape'||k==='Backspace')goLive();
 });
 // ---- Views (gallery / live / settings) ----
-function closeAllOverlays(){closeFacts();['gallery','live','settings'].forEach(id=>document.getElementById(id).classList.remove('show'));}
+function closeAllOverlays(){closeFacts();['gallery','live','settings','analytics'].forEach(id=>document.getElementById(id).classList.remove('show'));}
 function openView(id){closeAllOverlays();document.getElementById(id).classList.add('show');}
 function closeView(id){document.getElementById(id).classList.remove('show');}
-function curOverlay(){if(factsOpen)return'facts';return ['gallery','live','settings'].find(id=>document.getElementById(id).classList.contains('show'));}
+function curOverlay(){if(factsOpen)return'facts';return ['gallery','live','settings','analytics'].find(id=>document.getElementById(id).classList.contains('show'));}
 async function openGallery(){openView('gallery');
   const b=document.getElementById('galBody');b.innerHTML='Loading…';
   try{
@@ -417,6 +423,26 @@ async function openGallery(){openView('gallery');
     });
     if(!days.length)b.innerHTML='<div class="about">No birds yet today.</div>';
   }catch(e){b.innerHTML='<div class="about">Could not load.</div>';}
+}
+async function openAnalytics(){openView('analytics');
+  const b=document.getElementById('anBody');b.innerHTML='Loading…';
+  try{
+    const a=await (await fetch('/api/analytics',{cache:'no-store'})).json();
+    if(!a.detections){b.innerHTML='<div class="about">No detections yet today.</div>';return;}
+    const mx=Math.max(1,...a.hourly);
+    const bars=a.hourly.map((v,h)=>`<div class="bar${v===mx&&v?' peak':''}" style="height:${v/mx*100}%" title="${h}:00 — ${v}"></div>`).join('');
+    const tops=a.top.map(t=>`<div class="item"><img class="th" src="${IMG(t[0])}" onerror="this.style.visibility='hidden'"><div class="info"><div class="nm">${t[0]}</div></div><div class="cf">${t[1]} · ${Math.round(t[2]*100)}%</div></div>`).join('');
+    b.innerHTML=`
+      <div class="stats" style="margin-bottom:12px">
+        <div class="stat"><div class="n">${a.detections}</div><div class="l">Detections</div></div>
+        <div class="stat"><div class="n">${a.species}</div><div class="l">Species</div></div>
+        <div class="stat"><div class="n">${a.high_pct}%</div><div class="l">High-confidence</div></div>
+      </div>
+      <div class="about" style="padding:0 4px 10px">Mean confidence ${Math.round(a.conf_mean*100)}% · borderline (possible false IDs) <b>${a.bord_pct}%</b> · best hour ~${a.peak}:00</div>
+      <div class="chart" style="width:100%">${bars}</div>
+      <div class="xax" style="width:100%"><span>0</span><span>6</span><span>12</span><span>18</span></div>
+      <div class="dlabel" style="margin:16px 4px 8px">Top species today</div>${tops}`;
+  }catch(e){b.innerHTML='<div class="about">Could not load analytics.</div>';}
 }
 let specEnergy=0, specRAF=0, lastLiveKey='';
 function specLoop(){
