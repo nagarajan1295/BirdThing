@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # BirdThing dashboard API: serves recent BirdNET detections + bird photos for the
 # Car Thing 800x480 screen. Reads BirdNET-Pi's SQLite DB; proxies/caches Wikipedia photos.
-import sqlite3, os, json, urllib.request, urllib.parse, threading, time
+import sqlite3, os, json, urllib.request, urllib.parse, threading, time, subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DB = "/home/birdpi/BirdNET-Pi/scripts/birds.db"
@@ -170,6 +170,30 @@ def song(name):
         return {"url": "", "err": str(e)}
 
 
+def play_pi(name):
+    # Play the bird's call on the PI's default audio sink (e.g. a paired Bluetooth speaker).
+    s = song(name)
+    if not s.get("url"):
+        return {"ok": False, "err": s.get("err", "no-recording")}
+    try:
+        subprocess.run(["pkill", "-f", "mpg123"], capture_output=True)
+        subprocess.Popen(["mpg123", "-q", s["url"]],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"ok": True}
+    except FileNotFoundError:
+        return {"ok": False, "err": "mpg123-not-installed"}
+    except Exception as e:
+        return {"ok": False, "err": str(e)}
+
+
+def stop_pi():
+    try:
+        subprocess.run(["pkill", "-f", "mpg123"], capture_output=True)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 def fetch_info(name):
     safe = "".join(c for c in name if c.isalnum() or c in " -").strip()
     path = os.path.join(CACHE, safe + ".json")
@@ -239,6 +263,12 @@ class H(BaseHTTPRequestHandler):
             q = urllib.parse.urlparse(self.path).query
             name = urllib.parse.parse_qs(q).get("name", [""])[0]
             self._send(200, "application/json", json.dumps(song(name)).encode())
+        elif self.path.startswith("/api/play_pi"):
+            q = urllib.parse.urlparse(self.path).query
+            name = urllib.parse.parse_qs(q).get("name", [""])[0]
+            self._send(200, "application/json", json.dumps(play_pi(name)).encode())
+        elif self.path.startswith("/api/stop_pi"):
+            self._send(200, "application/json", json.dumps(stop_pi()).encode())
         elif self.path.startswith("/api/info"):
             q = urllib.parse.urlparse(self.path).query
             name = urllib.parse.parse_qs(q).get("name", [""])[0]

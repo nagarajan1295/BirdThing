@@ -34,8 +34,17 @@ def control_server():
                 os.system("sudo systemctl reboot")
             elif self.path.startswith("/poweroff"):
                 os.system("sudo systemctl poweroff")
-            self.send_response(200); self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
             self.end_headers(); self.wfile.write(b"ok")
+        def do_OPTIONS(self):                       # Chromium Private Network Access preflight
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "*")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+            self.end_headers()
     try:
         HTTPServer(("127.0.0.1", 8091), H).serve_forever()
     except Exception:
