@@ -240,6 +240,8 @@
       <div class="seg2"><button onclick="setBright('auto')" data-br="auto">Auto</button><button onclick="setBright('low')" data-br="low">Low</button><button onclick="setBright('mid')" data-br="mid">Mid</button><button onclick="setBright('high')" data-br="high">High</button></div></div>
     <div class="srow"><span class="sk">Analytics</span>
       <div class="seg2"><button onclick="openAnalytics()">Open today's report</button></div></div>
+    <div class="srow"><span class="sk">Wi‑Fi</span>
+      <div class="seg2"><button onclick="openWifi()">Change network</button></div></div>
     <div class="srow" style="border:none;flex-direction:column;align-items:flex-start;gap:8px">
       <span class="sk">Today's activity</span>
       <div class="chart" id="chart" style="width:100%"></div>
@@ -252,6 +254,21 @@
   <div class="vhead"><div class="vtitle">Analytics</div><div class="vclose" onclick="closeView('analytics')">Back</div></div>
   <div class="vbody" id="anBody">Loading…</div>
 </div>
+<div id="wifi" class="view">
+  <div class="vhead"><div class="vtitle">Wi‑Fi</div><div class="vclose" onclick="closeView('wifi')">Back</div></div>
+  <div class="vbody">
+    <div class="about" id="wifiCur" style="padding:0 4px 10px">Scanning…</div>
+    <div id="wifiList"></div>
+    <div id="wifiPanel" style="display:none">
+      <div style="display:flex;align-items:center;gap:10px;margin:10px 4px">
+        <span class="sk" id="wifiSsid"></span>
+        <span class="qbox" id="wifiPass" style="flex:1">password</span>
+        <div class="key" style="flex:0 0 auto;padding:13px 22px;background:var(--green);color:#000" onclick="wifiConnect()">Connect</div>
+      </div>
+      <div id="wkb" style="display:flex;flex-direction:column;gap:7px"></div>
+    </div>
+  </div>
+</div>
 <script>
 const VERSION="1.0 (USB)";
 const CT="http://127.0.0.1:8091";
@@ -259,7 +276,7 @@ const CT="http://127.0.0.1:8091";
 let dispOff=false;
 function toggleDisplay(){dispOff=!dispOff;fetch(CT+"/display?on="+(dispOff?0:1)).catch(()=>{});}
 const IMG=n=>"/api/image?name="+encodeURIComponent(n);
-let rows=[],sel=0,follow=true,factsOpen=false,heroTok=0;
+let rows=[],sel=0,follow=true,factsOpen=false,heroTok=0,lastHeroUrl='';
 // Clock/date come from the Pi (authoritative NTP time): the Car Thing has no RTC/NTP
 // and a wrong system clock + timezone, so we never trust the browser's local Date.
 const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -286,13 +303,17 @@ function renderHero(){
   document.getElementById('heroConf').textContent=Math.round(b.conf*100)+'%';
   document.getElementById('heroWhen').textContent=fmt12(b.time)+(follow&&sel===0?' · Live':'');
   const url=IMG(b.com);
-  // preload, then crossfade in only when the image is actually ready (fixes blank/stale thumbnails)
-  heroTok++;const tok=heroTok,hp=document.getElementById('heroPhoto'),hb=document.getElementById('heroBg');
-  hp.style.opacity='.3';
-  const pre=new Image();
-  pre.onload=()=>{if(tok!==heroTok)return;hp.style.backgroundImage=`url('${url}')`;hb.style.backgroundImage=`url('${url}')`;hp.style.opacity='1';};
-  pre.onerror=()=>{if(tok!==heroTok)return;hp.style.opacity='1';};
-  pre.src=url;
+  // only reload the photo when the bird actually changes (otherwise the 1s refresh re-triggers
+  // the fade every tick = blinking). Preload + crossfade in once it's ready.
+  if(url!==lastHeroUrl){
+    lastHeroUrl=url;
+    heroTok++;const tok=heroTok,hp=document.getElementById('heroPhoto'),hb=document.getElementById('heroBg');
+    hp.style.opacity='.3';
+    const pre=new Image();
+    pre.onload=()=>{if(tok!==heroTok)return;hp.style.backgroundImage=`url('${url}')`;hb.style.backgroundImage=`url('${url}')`;hp.style.opacity='1';};
+    pre.onerror=()=>{if(tok!==heroTok)return;hp.style.opacity='1';};
+    pre.src=url;
+  }
 }
 function renderList(){
   const L=document.getElementById('list');L.innerHTML='';
@@ -399,10 +420,10 @@ document.addEventListener('keydown',(ev)=>{
   else if(k==='Escape'||k==='Backspace')goLive();
 });
 // ---- Views (gallery / live / settings) ----
-function closeAllOverlays(){closeFacts();['gallery','live','settings','analytics'].forEach(id=>document.getElementById(id).classList.remove('show'));}
+function closeAllOverlays(){closeFacts();['gallery','live','settings','analytics','wifi'].forEach(id=>document.getElementById(id).classList.remove('show'));}
 function openView(id){closeAllOverlays();document.getElementById(id).classList.add('show');}
 function closeView(id){document.getElementById(id).classList.remove('show');}
-function curOverlay(){if(factsOpen)return'facts';return ['gallery','live','settings','analytics'].find(id=>document.getElementById(id).classList.contains('show'));}
+function curOverlay(){if(factsOpen)return'facts';return ['gallery','live','settings','analytics','wifi'].find(id=>document.getElementById(id).classList.contains('show'));}
 async function openGallery(){openView('gallery');
   const b=document.getElementById('galBody');b.innerHTML='Loading…';
   try{
@@ -424,6 +445,43 @@ async function openGallery(){openView('gallery');
     if(!days.length)b.innerHTML='<div class="about">No birds yet today.</div>';
   }catch(e){b.innerHTML='<div class="about">Could not load.</div>';}
 }
+// Wi-Fi picker (changes the Pi's network via nmcli through /api/wifi/*)
+let wifiSsid='',wpass='',wshift=false;
+async function openWifi(){openView('wifi');
+  document.getElementById('wifiPanel').style.display='none';wpass='';wshift=false;
+  const cur=document.getElementById('wifiCur');cur.textContent='Scanning…';
+  try{
+    const s=await (await fetch('/api/wifi',{cache:'no-store'})).json();
+    const list=await (await fetch('/api/wifi/scan',{cache:'no-store'})).json();
+    cur.innerHTML='Connected to <b>'+(s.ssid||'—')+'</b>';
+    const L=document.getElementById('wifiList');L.innerHTML='';
+    if(!list.length)L.innerHTML='<div class="about">No networks found.</div>';
+    list.forEach(n=>{const d=document.createElement('div');d.className='item';
+      d.innerHTML=`<div class="info"><div class="nm">${n.ssid}</div><div class="tm">${n.secure?'secured':'open'}</div></div><div class="cf">${n.signal}</div>`;
+      d.onclick=()=>wifiPick(n);L.appendChild(d);});
+  }catch(e){cur.textContent='Wi‑Fi scan failed';}
+}
+function wifiPick(n){wifiSsid=n.ssid;wpass='';wshift=false;
+  document.getElementById('wifiSsid').textContent=n.ssid;
+  document.getElementById('wifiPanel').style.display='block';showWpass();buildWkb();}
+function showWpass(){document.getElementById('wifiPass').textContent=wpass||'password';}
+function wkey(ch){wpass+=ch;wshift=false;showWpass();buildWkb();}
+function buildWkb(){const kb=document.getElementById('wkb');kb.innerHTML='';
+  [['1','2','3','4','5','6','7','8','9','0'],...KB].forEach(row=>{
+    const r=document.createElement('div');r.className='krow';
+    row.forEach(ch=>{const k=document.createElement('div');k.className='key';
+      const c=/[A-Z]/.test(ch)?(wshift?ch:ch.toLowerCase()):ch;
+      k.textContent=c;k.onclick=()=>wkey(c);r.appendChild(k);});kb.appendChild(r);});
+  const r=document.createElement('div');r.className='krow';
+  const sh=document.createElement('div');sh.className='key';sh.textContent=wshift?'⇧·ON':'⇧';sh.onclick=()=>{wshift=!wshift;buildWkb();};
+  const sp=document.createElement('div');sp.className='key wide';sp.textContent='space';sp.onclick=()=>wkey(' ');
+  const bs=document.createElement('div');bs.className='key';bs.textContent='⌫';bs.onclick=()=>{wpass=wpass.slice(0,-1);showWpass();};
+  r.appendChild(sh);r.appendChild(sp);r.appendChild(bs);kb.appendChild(r);}
+async function wifiConnect(){const cur=document.getElementById('wifiCur');cur.textContent='Connecting to '+wifiSsid+'…';
+  try{const r=await (await fetch('/api/wifi/connect?ssid='+encodeURIComponent(wifiSsid)+'&psk='+encodeURIComponent(wpass))).json();
+    cur.innerHTML=r.ok?('Connected to <b>'+wifiSsid+'</b> ✓'):('Failed: '+(r.msg||'error'));
+    if(r.ok)document.getElementById('wifiPanel').style.display='none';
+  }catch(e){cur.textContent='Connection error';}}
 async function openAnalytics(){openView('analytics');
   const b=document.getElementById('anBody');b.innerHTML='Loading…';
   try{
