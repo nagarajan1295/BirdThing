@@ -10,6 +10,18 @@ Built by **Naga**.
 
 ![BirdThing dashboard](docs/dashboard.png)
 
+### More views & features
+
+| Settings — text sizes & brightness | Wi‑Fi picker (on‑screen keyboard) |
+|---|---|
+| ![Settings](docs/screenshots/settings.png) | ![Wi‑Fi](docs/screenshots/wifi-keyboard.png) |
+| **Analytics** — today's volume & confidence | **Accessibility** — XL text |
+| ![Analytics](docs/screenshots/analytics.png) | ![XL text](docs/screenshots/accessibility-xl.png) |
+
+Features: Small→XXL text sizes, auto/low/mid/high brightness, on‑screen **Wi‑Fi** switcher,
+**bird‑region** + geo‑filter (precision↔catch‑all) with IP auto‑location, tap‑to‑open Wikipedia
+facts with a ▶ play‑call (Xeno‑canto), nightly analytics, and a self‑healing mic.
+
 ---
 
 ## How it works
