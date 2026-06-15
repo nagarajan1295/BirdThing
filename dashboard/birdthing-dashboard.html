@@ -110,11 +110,11 @@
   #wxResults .res{font-size:19px;padding:11px 14px;border-radius:12px;color:var(--fg);font-weight:500;}
   #wxResults .res:active{background:var(--card2);}
   #kb{width:100%;max-width:780px;display:flex;flex-direction:column;gap:7px;}
-  #kb .krow{display:flex;gap:7px;justify-content:center;}
-  #kb .key{flex:1;background:var(--card);border-radius:11px;font-size:22px;font-weight:600;
+  .krow{display:flex;gap:7px;justify-content:center;}
+  .key{flex:1;background:var(--card);border-radius:11px;font-size:22px;font-weight:600;
     color:var(--fg);padding:13px 0;text-align:center;font-family:inherit;}
-  #kb .key:active{background:var(--card2);}
-  #kb .key.wide{flex:2.4;}
+  .key:active{background:var(--card2);}
+  .key.wide{flex:2.4;}
   /* generic full-screen view */
   .view{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;z-index:15;
     opacity:0;visibility:hidden;transform:scale(1.015);
@@ -268,6 +268,7 @@
       <div style="display:flex;align-items:center;gap:10px;margin:10px 4px">
         <span class="sk" id="wifiSsid"></span>
         <span class="qbox" id="wifiPass" style="flex:1">password</span>
+        <div class="key" id="wifiEye" style="flex:0 0 auto;padding:13px 16px" onclick="wreveal=!wreveal;showWpass()">show</div>
         <div class="key" style="flex:0 0 auto;padding:13px 22px;background:var(--green);color:#000" onclick="wifiConnect()">Connect</div>
       </div>
       <div id="wkb" style="display:flex;flex-direction:column;gap:7px"></div>
@@ -451,7 +452,7 @@ async function openGallery(){openView('gallery');
   }catch(e){b.innerHTML='<div class="about">Could not load.</div>';}
 }
 // Wi-Fi picker (changes the Pi's network via nmcli through /api/wifi/*)
-let wifiSsid='',wpass='',wshift=false;
+let wifiSsid='',wpass='',wshift=false,wreveal=false;
 async function openWifi(){openView('wifi');
   document.getElementById('wifiPanel').style.display='none';wpass='';wshift=false;
   const cur=document.getElementById('wifiCur');cur.textContent='Scanning…';
@@ -466,10 +467,12 @@ async function openWifi(){openView('wifi');
       d.onclick=()=>wifiPick(n);L.appendChild(d);});
   }catch(e){cur.textContent='Wi‑Fi scan failed';}
 }
-function wifiPick(n){wifiSsid=n.ssid;wpass='';wshift=false;
+function wifiPick(n){wifiSsid=n.ssid;wpass='';wshift=false;wreveal=false;
   document.getElementById('wifiSsid').textContent=n.ssid;
   document.getElementById('wifiPanel').style.display='block';showWpass();buildWkb();}
-function showWpass(){document.getElementById('wifiPass').textContent=wpass||'password';}
+function showWpass(){const el=document.getElementById('wifiPass');
+  el.textContent=wpass?(wreveal?wpass:'•'.repeat(wpass.length)):'password';
+  const eye=document.getElementById('wifiEye');if(eye)eye.textContent=wreveal?'hide':'show';}
 function wkey(ch){wpass+=ch;wshift=false;showWpass();buildWkb();}
 function buildWkb(){const kb=document.getElementById('wkb');kb.innerHTML='';
   [['1','2','3','4','5','6','7','8','9','0'],...KB].forEach(row=>{
