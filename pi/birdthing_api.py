@@ -170,6 +170,40 @@ def song(name):
         return {"url": "", "err": str(e)}
 
 
+def analytics():
+    # Live "today" analytics for the on-screen view: volume, species, and a confidence-based
+    # quality proxy (high-confidence vs borderline = likely-false).
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % DB, uri=True, timeout=5)
+        today = con.execute("SELECT MAX(Date) FROM detections").fetchone()[0]
+        rows = con.execute("SELECT Com_Name,Confidence,Time FROM detections WHERE Date=?",
+                           (today,)).fetchall()
+        con.close()
+        if not rows:
+            return {"date": today, "detections": 0, "species": 0}
+        confs = [r[1] for r in rows]
+        sp = {}
+        for com, cf, _ in rows:
+            sp.setdefault(com, []).append(cf)
+        hourly = [0] * 24
+        for _, _, t in rows:
+            try:
+                hourly[int(t[:2])] += 1
+            except Exception:
+                pass
+        hi = sum(1 for c in confs if c >= 0.85)
+        bord = sum(1 for c in confs if 0.70 <= c < 0.80)
+        top = sorted(([k, len(v), round(sum(v) / len(v), 2)] for k, v in sp.items()),
+                     key=lambda x: -x[1])[:8]
+        return {"date": today, "detections": len(rows), "species": len(sp),
+                "conf_mean": round(sum(confs) / len(confs), 2),
+                "high_pct": round(100 * hi / len(confs)),
+                "bord_pct": round(100 * bord / len(confs)),
+                "hourly": hourly, "peak": hourly.index(max(hourly)), "top": top}
+    except Exception as e:
+        return {"date": "", "detections": 0, "species": 0, "err": str(e)}
+
+
 def play_pi(name):
     # Play the bird's call on the PI's default audio sink (e.g. a paired Bluetooth speaker).
     s = song(name)
@@ -263,6 +297,8 @@ class H(BaseHTTPRequestHandler):
             q = urllib.parse.urlparse(self.path).query
             name = urllib.parse.parse_qs(q).get("name", [""])[0]
             self._send(200, "application/json", json.dumps(song(name)).encode())
+        elif self.path.startswith("/api/analytics"):
+            self._send(200, "application/json", json.dumps(analytics()).encode())
         elif self.path.startswith("/api/play_pi"):
             q = urllib.parse.urlparse(self.path).query
             name = urllib.parse.parse_qs(q).get("name", [""])[0]
