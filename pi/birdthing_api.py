@@ -170,6 +170,58 @@ def song(name):
         return {"url": "", "err": str(e)}
 
 
+BNCONF = "/home/birdpi/BirdNET-Pi/birdnet.conf"
+
+def _set_conf(kv):
+    try:
+        lines = open(BNCONF).read().splitlines()
+        seen = set()
+        for i, l in enumerate(lines):
+            for k, v in kv.items():
+                if l.startswith(k + "="):
+                    lines[i] = "%s=%s" % (k, v); seen.add(k)
+        for k, v in kv.items():
+            if k not in seen:
+                lines.append("%s=%s" % (k, v))
+        open(BNCONF, "w").write("\n".join(lines) + "\n")
+        subprocess.run(["sudo", "systemctl", "restart", "birdnet_analysis"], capture_output=True)
+        return True
+    except Exception:
+        return False
+
+def birdloc(lat, lon, place):
+    try:
+        kv = {"LATITUDE": "%.4f" % float(lat), "LONGITUDE": "%.4f" % float(lon)}
+    except Exception:
+        return {"ok": False, "err": "bad coords"}
+    ok = _set_conf(kv)
+    if place:
+        try:
+            json.dump({"place": place}, open(BIRDLOC_FILE, "w"))
+        except Exception:
+            pass
+    return {"ok": ok, "lat": kv["LATITUDE"], "lon": kv["LONGITUDE"], "place": place}
+
+def set_sf(thresh):
+    try:
+        t = max(0.0, min(0.1, float(thresh)))
+    except Exception:
+        return {"ok": False}
+    return {"ok": _set_conf({"SF_THRESH": "%.3f" % t}), "sf": t}
+
+def geoip():
+    try:
+        r = json.load(urllib.request.urlopen(
+            "http://ip-api.com/json/?fields=status,lat,lon,city,regionName,country", timeout=8))
+        if r.get("status") != "success":
+            return {"err": "lookup failed"}
+        place = ", ".join(x for x in [r.get("city"), r.get("regionName"), r.get("country")] if x)
+        return {"lat": r.get("lat"), "lon": r.get("lon"), "place": place}
+    except Exception as e:
+        return {"err": str(e)}
+
+BIRDLOC_FILE = "/opt/birdthing/birdloc.json"
+
 def _nm_unesc(s):
     return s.replace("\\:", ":").replace("\\\\", "\\")
 
@@ -346,6 +398,15 @@ class H(BaseHTTPRequestHandler):
             q = urllib.parse.urlparse(self.path).query
             name = urllib.parse.parse_qs(q).get("name", [""])[0]
             self._send(200, "application/json", json.dumps(song(name)).encode())
+        elif self.path.startswith("/api/geoip"):
+            self._send(200, "application/json", json.dumps(geoip()).encode())
+        elif self.path.startswith("/api/birdloc"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, "application/json", json.dumps(birdloc(
+                q.get("lat", ["0"])[0], q.get("lon", ["0"])[0], q.get("place", [""])[0])).encode())
+        elif self.path.startswith("/api/sf"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, "application/json", json.dumps(set_sf(q.get("t", ["0.03"])[0])).encode())
         elif self.path.startswith("/api/wifi/scan"):
             self._send(200, "application/json", json.dumps(wifi_scan()).encode())
         elif self.path.startswith("/api/wifi/connect"):
