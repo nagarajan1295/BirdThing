@@ -42,19 +42,19 @@
     display:flex;flex-direction:column;}
   .hero .bg{position:absolute;inset:0;background-size:cover;background-position:center;
     filter:blur(34px) brightness(.4);transform:scale(1.25);}
-  .hero .photo{position:relative;flex:1;min-height:0;background-size:contain;
+  .hero .photo{position:relative;flex:1;min-height:44%;background-size:contain;
     background-repeat:no-repeat;background-position:center;transition:opacity .45s ease;}
   .hero .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
     justify-content:center;gap:14px;color:var(--sec);}
   .hero .empty .big{font-size:64px;}
   .hero .meta{position:relative;flex-shrink:0;padding:18px 24px 20px;
     background:linear-gradient(0deg,rgba(0,0,0,.92),rgba(0,0,0,.55) 55%,transparent);}
-  .hero .com{font-size:calc(42px*min(var(--ts),1.5));font-weight:700;line-height:1.04;letter-spacing:-.02em;}
-  .hero .sci{font-size:calc(19px*var(--ts));font-weight:400;color:#c7c7cc;font-style:italic;margin-top:5px;}
+  .hero .com{font-size:calc(42px*min(var(--ts),1.35));font-weight:700;line-height:1.04;letter-spacing:-.02em;}
+  .hero .sci{font-size:calc(19px*min(var(--ts),1.2));font-weight:400;color:#c7c7cc;font-style:italic;margin-top:5px;}
   .hero .row{display:flex;align-items:center;gap:13px;margin-top:15px;}
-  .pill{background:rgba(255,255,255,.16);backdrop-filter:blur(10px);font-size:calc(16px*var(--ts));font-weight:600;
+  .pill{background:rgba(255,255,255,.16);backdrop-filter:blur(10px);font-size:calc(16px*min(var(--ts),1.2));font-weight:600;
     padding:5px 13px;border-radius:30px;}
-  .hero .when{font-size:calc(16px*var(--ts));color:#c7c7cc;font-weight:500;}
+  .hero .when{font-size:calc(16px*min(var(--ts),1.2));color:#c7c7cc;font-weight:500;}
   /* LIST */
   aside{margin:6px 16px 14px 6px;display:flex;flex-direction:column;min-height:0;}
   .stats{display:flex;gap:8px;margin-bottom:10px;}
@@ -323,20 +323,20 @@ function move(delta){
   renderHero();renderList();
 }
 function goLive(){follow=true;sel=0;closeFacts();renderHero();renderList();}
-let curSci='',curCom='';
+let curSci='',curCom='',songPlaying=false;
+// Plays on the PI's audio out (so a Bluetooth speaker on the Pi makes the sound) — the Car Thing
+// has no speaker. Needs a Xeno-canto API key in /opt/birdthing/xenocanto.key.
 function playSong(){
-  const au=document.getElementById('songAudio'),btn=document.getElementById('fPlay');
-  au.onended=()=>{btn.textContent='▶ Play call';};
-  if(au.src&&!au.paused){au.pause();btn.textContent='▶ Play call';return;}
-  if(au.src){au.play();btn.textContent='⏸ Pause';return;}
+  const btn=document.getElementById('fPlay');
+  if(songPlaying){fetch('/api/stop_pi').catch(()=>{});songPlaying=false;btn.textContent='▶ Play call';return;}
   btn.textContent='Loading…';
-  fetch('/api/song?name='+encodeURIComponent(curSci||curCom)).then(r=>r.json()).then(d=>{
-    if(d.url){au.src=d.url;au.play().then(()=>btn.textContent='⏸ Pause').catch(()=>btn.textContent='▶ Play call');}
+  fetch('/api/play_pi?name='+encodeURIComponent(curSci||curCom)).then(r=>r.json()).then(d=>{
+    if(d.ok){songPlaying=true;btn.textContent='⏸ Stop';}
     else btn.textContent=(d.err==='no-key')?'Set API key':'No recording';
   }).catch(()=>{btn.textContent='▶ Play call';});
 }
 async function openFactsFor(com,sci){
-  factsOpen=true;curCom=com;curSci=sci||'';
+  factsOpen=true;curCom=com;curSci=sci||'';songPlaying=false;
   document.getElementById('fPlay').textContent='▶ Play call';
   document.getElementById('fTitle').textContent=com;
   document.getElementById('fSci').textContent=sci||'';
@@ -350,7 +350,7 @@ async function openFactsFor(com,sci){
 }
 function openFacts(){if(!rows.length)return;const b=rows[sel];openFactsFor(b.com,b.sci);}
 function closeFacts(){factsOpen=false;document.getElementById('facts').classList.remove('show');
-  const au=document.getElementById('songAudio');try{au.pause();au.removeAttribute('src');}catch(e){}}
+  if(songPlaying){fetch('/api/stop_pi').catch(()=>{});songPlaying=false;}}
 document.getElementById('facts').onclick=(e)=>{if(e.target.id==='facts')closeFacts();};
 function factsScroll(d){document.getElementById('fBody').scrollBy({top:d*90,behavior:'smooth'});}
 function btnNav(k){ // top buttons 1-4 switch views from anywhere
