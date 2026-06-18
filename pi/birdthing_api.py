@@ -238,7 +238,11 @@ def wifi_status():
 
 def wifi_scan():
     try:
-        subprocess.run(["sudo", "nmcli", "dev", "wifi", "rescan"], capture_output=True, timeout=20)
+        # Trigger a rescan, then WAIT for the full multi-channel scan to finish before listing.
+        # (--rescan yes / immediate list return only the connected AP because the scan, while
+        # associated, hasn't swept all channels yet. rescan + ~5s settle finds every nearby network.)
+        subprocess.run(["nmcli", "dev", "wifi", "rescan"], capture_output=True, timeout=15)
+        time.sleep(5)
         out = subprocess.run(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list"],
                              capture_output=True, text=True, timeout=15).stdout
         best = {}
@@ -256,7 +260,7 @@ def wifi_scan():
             sec = len(p) > 2 and p[2] not in ("", "--")
             if ssid not in best or sig > best[ssid]["signal"]:
                 best[ssid] = {"ssid": ssid, "signal": sig, "secure": sec}
-        return sorted(best.values(), key=lambda x: -x["signal"])[:18]
+        return sorted(best.values(), key=lambda x: -x["signal"])[:30]
     except Exception as e:
         return []
 
