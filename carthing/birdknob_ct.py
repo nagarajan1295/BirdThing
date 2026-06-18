@@ -21,9 +21,9 @@ def control_server():
         def do_GET(self):
             q = up.parse_qs(up.urlparse(self.path).query)
             if self.path.startswith("/bright"):
-                lvl = q.get("level", ["auto"])[0]
-                if lvl in ("auto", "low", "mid", "high"):
-                    open("/tmp/bt_bright", "w").write(lvl)
+                lvl = q.get("level", ["70"])[0]
+                if lvl.isdigit():
+                    open("/tmp/bt_bright", "w").write(str(max(0, min(100, int(lvl)))))
             elif self.path.startswith("/display"):
                 on = q.get("on", ["1"])[0]
                 if on == "0": open("/tmp/display_off", "w").close()
