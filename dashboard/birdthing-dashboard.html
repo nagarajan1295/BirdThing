@@ -156,6 +156,8 @@
   .bwrap{display:flex;align-items:center;gap:10px;width:100%;}
   .slider{flex:1;height:30px;background:var(--card);border-radius:15px;overflow:hidden;}
   .bfill{height:100%;background:var(--green);border-radius:15px;transition:width .12s ease;}
+  .slider.active{outline:3px solid #ff9f0a;outline-offset:2px;}
+  .slider.active .bfill{background:#ff9f0a;}
   .bbtn{background:var(--card2);border:none;color:var(--fg);font-size:calc(24px*var(--ts));font-weight:700;
     width:56px;height:46px;border-radius:11px;font-family:inherit;flex:0 0 auto;}
   .seg2 button.on{background:var(--card2);}
@@ -175,7 +177,7 @@
 <div id="app">
   <div class="top">
     <div class="wx" id="wx" onclick="openWx()"><span id="wxIcon">🌡️</span><span id="wxTemp">--°</span></div>
-    <div class="tr"><div id="date"></div><div class="live"><div class="dot"></div><span>Live</span></div><div id="clock">--:--</div></div>
+    <div class="tr"><div id="date"></div><div class="live"><div class="dot"></div><span id="liveTxt">Live</span></div><div id="clock">--:--</div></div>
   </div>
   <div class="hero" id="hero" onclick="openFacts()">
     <div class="bg" id="heroBg"></div>
@@ -245,7 +247,7 @@
       <div class="bwrap"><button class="bbtn" onclick="brightStep(-10)">−</button>
         <div class="slider" id="bbar" onclick="brightTap(event)"><div class="bfill" id="bfill"></div></div>
         <button class="bbtn" onclick="brightStep(10)">+</button></div>
-      <span class="about" style="padding:2px 4px 0">Highlight the bar with the knob, then turn to dim/brighten · or tap the bar.</span></div>
+      <span class="about" style="padding:2px 4px 0">Knob: scroll to the bar, <b>press to activate</b> (turns orange), turn to dim/brighten, press again to finish · or tap the bar.</span></div>
     <div class="srow"><span class="sk">Analytics</span>
       <div class="seg2"><button onclick="openAnalytics()">Open today's report</button></div></div>
     <div class="srow"><span class="sk">Wi‑Fi</span>
@@ -290,7 +292,7 @@ const CT="http://127.0.0.1:8091";
 let dispOff=false;
 function toggleDisplay(){dispOff=!dispOff;fetch(CT+"/display?on="+(dispOff?0:1)).catch(()=>{});}
 const IMG=n=>"/api/image?name="+encodeURIComponent(n);
-let rows=[],sel=0,follow=true,factsOpen=false,heroTok=0,lastHeroUrl='';
+let rows=[],sel=0,follow=true,factsOpen=false,heroTok=0,lastHeroUrl='',lastDetAt=0;
 // Clock/date come from the Pi (authoritative NTP time): the Car Thing has no RTC/NTP
 // and a wrong system clock + timezone, so we never trust the browser's local Date.
 const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -303,7 +305,8 @@ function tick(){
   const d=new Date(base); // shifted so UTC getters read Pi-local wall clock
   let h=d.getUTCHours();const ap=h<12?'AM':'PM';const hh=(h%12)||12;
   document.getElementById('clock').textContent=hh+':'+String(d.getUTCMinutes()).padStart(2,'0')+' '+ap;
-  document.getElementById('date').textContent=DAYS[d.getUTCDay()]+', '+MON[d.getUTCMonth()]+' '+d.getUTCDate();}
+  document.getElementById('date').textContent=DAYS[d.getUTCDay()]+', '+MON[d.getUTCMonth()]+' '+d.getUTCDate();
+  const lt=document.getElementById('liveTxt');if(lt)lt.textContent=(Date.now()-lastDetAt<6000)?'Hearing a bird…':'Live';}
 setInterval(tick,1000);tick();
 // detection timestamps -> 12-hour to match the top clock
 function fmt12(t){if(!t)return'';const p=t.split(':'),m=p[1]||'00';let h=+p[0];const ap=h<12?'AM':'PM';h=h%12;if(h===0)h=12;return h+':'+m+' '+ap;}
@@ -349,7 +352,7 @@ async function refresh(){
     document.getElementById('stSpecies').textContent=d.today_species||0;
     const nr=d.rows||[];
     const nk=nr.length?nr[0].time+nr[0].com:'';
-    if(nk&&nk!==lastLiveKey){lastLiveKey=nk;specEnergy=1;}   // fresh ID -> pulse spectrogram
+    if(nk&&nk!==lastLiveKey){lastLiveKey=nk;specEnergy=1;lastDetAt=Date.now();}   // fresh ID -> pulse + "hearing a bird"
     rows=nr;
     if(follow)sel=0;
     if(document.getElementById('live').classList.contains('show'))renderLive();
@@ -417,16 +420,16 @@ document.addEventListener('keydown',(ev)=>{
   if(v){
     if(v==='settings'){
       const o=setOpts()[setSel];
-      if(o&&o.classList.contains('slider')){   // brightness: turn knob to adjust, press to leave
+      const onSlider=o&&o.classList.contains('slider');
+      if(onSlider&&sliderActive){              // ACTIVE: knob turns adjust brightness
         if(k==='ArrowDown'||k==='ArrowRight'){brightStep(5);return;}
         if(k==='ArrowUp'||k==='ArrowLeft'){brightStep(-5);return;}
-        if(k==='Enter'){setMove(1);return;}
-        if(k==='Escape'||k==='Backspace'){closeView('settings');return;}
+        if(k==='Enter'||k==='Escape'||k==='Backspace'){sliderActive=false;o.classList.remove('active');return;}
         return;
       }
-      if(k==='ArrowDown'||k==='ArrowRight')setMove(1);
+      if(k==='ArrowDown'||k==='ArrowRight')setMove(1);   // normal scroll = navigate (incl. past slider)
       else if(k==='ArrowUp'||k==='ArrowLeft')setMove(-1);
-      else if(k==='Enter'){if(o)o.click();}
+      else if(k==='Enter'){if(onSlider){sliderActive=true;o.classList.add('active');}else if(o)o.click();}
       else if(k==='Escape'||k==='Backspace')closeView('settings');
       return;
     }
@@ -563,14 +566,16 @@ function renderLive(){
   const img=document.getElementById('liveImg');img.style.visibility='visible';img.src=IMG(b.com);
 }
 // knob/arrow navigation of Settings options (so you don't have to tap toggles near the edge)
-let setSel=0;
+let setSel=0,sliderActive=false;
 function setOpts(){return Array.from(document.querySelectorAll('#settings .vbody button, #settings .vbody .slider'));}
 function setHi(){const o=setOpts();o.forEach((b,i)=>b.classList.toggle('khi',i===setSel));const c=o[setSel];if(c)c.scrollIntoView({block:'nearest',behavior:'smooth'});}
-function setMove(d){const o=setOpts();if(!o.length)return;setSel=(setSel+d+o.length)%o.length;setHi();}
+function setMove(d){const o=setOpts();if(!o.length)return;
+  sliderActive=false;document.querySelectorAll('#settings .slider.active').forEach(s=>s.classList.remove('active'));
+  setSel=(setSel+d+o.length)%o.length;setHi();}
 async function openSettings(){openView('settings');markSettings();applyBright();renderStats();
   document.getElementById('about').innerHTML=
     `BirdThing · version <b>${VERSION}</b><br>Listens for birds with a Spotify Car Thing &amp; BirdNET.<br>Created by <b>Naga</b>.`;
-  setSel=0;setTimeout(setHi,60);
+  setSel=0;sliderActive=false;setTimeout(setHi,60);
 }
 async function renderStats(){
   try{
