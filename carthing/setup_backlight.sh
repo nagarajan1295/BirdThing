@@ -1,30 +1,26 @@
 #!/bin/bash
-# BirdThing backlight: auto-brightness from the tmd2772 ambient light sensor, with manual
-# override modes. /tmp/display_off blanks the screen (toggled by the 'm' top button).
-# /tmp/bt_bright = auto|low|mid|high (set from the dashboard Settings page via the knob daemon).
-SENSOR="/sys/bus/iio/devices/iio:device0/in_illuminance0_input"
+# BirdThing backlight. /tmp/bt_bright holds a brightness PERCENT 0-100 (set from the dashboard
+# slider via the knob daemon). This panel's backlight is INVERTED (a higher raw value makes it
+# DIMMER), so we write MAX-raw. /tmp/display_off blanks the screen (= write MAX on this panel).
 BACKLIGHT="/sys/class/backlight/aml-bl/brightness"
 FLAG="/tmp/display_off"
 MODEF="/tmp/bt_bright"
-MIN=90; MAX=255   # floor raised: the tmd2772 ambient sensor reads 0 on this unit, so auto used to
-                  # pin the screen at a too-dim 18; 90 keeps it readable. 'm' button still blanks it.
+MAX=255
 cur=-1
+clampw(){ w=$1; [ "$w" -lt 3 ] && w=3; [ "$w" -gt "$MAX" ] && w=$MAX; echo "$w"; }
 while :; do
   if [ -f "$FLAG" ]; then
-    [ "$cur" != "0" ] && { echo 0 > "$BACKLIGHT"; cur=0; }
+    # screen off: inverted panel -> MAX = dark
+    [ "$cur" != "$MAX" ] && { echo "$MAX" > "$BACKLIGHT"; cur=$MAX; }
     sleep 0.3; continue
   fi
-  mode=$(cat "$MODEF" 2>/dev/null); [ -z "$mode" ] && mode=auto
-  case "$mode" in
-    low)  b=45 ;;
-    mid)  b=130 ;;
-    high) b=255 ;;
-    *)    lux=$(cat "$SENSOR" 2>/dev/null); [ -z "$lux" ] && lux=10
-          b=$(( MIN + lux + lux/5 ))
-          [ "$b" -gt "$MAX" ] && b=$MAX; [ "$b" -lt "$MIN" ] && b=$MIN ;;
-  esac
-  if [ "$cur" -lt 0 ]; then cur=$b; fi
-  if [ "$b" -gt "$cur" ]; then cur=$(( cur + (b-cur+3)/4 )); else cur=$(( cur - (cur-b+3)/4 )); fi
+  p=$(cat "$MODEF" 2>/dev/null)
+  case "$p" in *[!0-9]*|"") p=70 ;; esac     # default 70% if unset / legacy keyword
+  [ "$p" -gt 100 ] && p=100
+  raw=$(( p * MAX / 100 ))                    # desired physical brightness (100% = bright)
+  target=$(clampw $(( MAX - raw )))           # INVERTED for this panel
+  if [ "$cur" -lt 0 ]; then cur=$target; fi
+  if [ "$target" -gt "$cur" ]; then cur=$(( cur + (target-cur+3)/4 )); else cur=$(( cur - (cur-target+3)/4 )); fi
   echo "$cur" > "$BACKLIGHT"
   sleep 0.4
 done
