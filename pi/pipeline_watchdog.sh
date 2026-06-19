@@ -22,14 +22,25 @@ EOF
 )
 peak=${peak:-0}
 ts=$(date '+%F %T')
+STATEF=/tmp/birdthing-wd-low
 if [ "$peak" -lt 30 ]; then
-    echo "$ts STALL (loopback peak=$peak) -> hard-resetting audio chain" >> "$LOG"
-    sshpass -p superbird ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 \
-        superbird@192.168.7.2 'sudo systemctl stop birdmic; sleep 2; sudo systemctl start birdmic' 2>/dev/null
-    sudo systemctl restart birdthing-recv
-    sudo systemctl restart birdnet_analysis
-    echo "$ts hard-reset done" >> "$LOG"
+    c=$(( $(cat "$STATEF" 2>/dev/null || echo 0) + 1 ))
+    echo "$c" > "$STATEF"
+    # debounce: only hard-reset after TWO consecutive silent checks (~4 min), so a brief mic
+    # reconnect during a normal restart doesn't trigger a needless reset.
+    if [ "$c" -ge 2 ]; then
+        echo "$ts STALL (peak=$peak x$c) -> hard-resetting audio chain" >> "$LOG"
+        sshpass -p superbird ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 \
+            superbird@192.168.7.2 'sudo systemctl stop birdmic; sleep 2; sudo systemctl start birdmic' 2>/dev/null
+        sudo systemctl restart birdthing-recv
+        sudo systemctl restart birdnet_analysis
+        echo 0 > "$STATEF"
+        echo "$ts hard-reset done" >> "$LOG"
+    else
+        echo "$ts low (peak=$peak x$c) - waiting one more cycle" >> "$LOG"
+    fi
 else
+    echo 0 > "$STATEF"
     echo "$ts ok (peak=$peak)" >> "$LOG"
 fi
 # keep the log small
