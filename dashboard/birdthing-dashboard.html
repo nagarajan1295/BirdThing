@@ -278,7 +278,7 @@
       <div style="display:flex;align-items:center;gap:10px;margin:10px 4px">
         <span class="sk" id="wifiSsid"></span>
         <span class="qbox" id="wifiPass" style="flex:1">password</span>
-        <div class="key" id="wifiEye" style="flex:0 0 auto;padding:13px 16px" onclick="wreveal=!wreveal;showWpass()">show</div>
+        <div class="key" id="wifiEye" style="flex:0 0 auto;padding:13px 16px" onclick="toggleWpass()">show</div>
         <div class="key" style="flex:0 0 auto;padding:13px 22px;background:var(--green);color:#000" onclick="wifiConnect()">Connect</div>
       </div>
       <div id="wkb" style="display:flex;flex-direction:column;gap:7px"></div>
@@ -492,6 +492,7 @@ function wifiPick(n){wifiSsid=n.ssid;wpass='';wshift=false;wreveal=false;
 function showWpass(){const el=document.getElementById('wifiPass');
   el.textContent=wpass?(wreveal?wpass:'•'.repeat(wpass.length)):'password';
   const eye=document.getElementById('wifiEye');if(eye)eye.textContent=wreveal?'hide':'show';}
+function toggleWpass(){wreveal=!wreveal;showWpass();}
 function wkey(ch){wpass+=ch;wshift=false;showWpass();buildWkb();}
 function buildWkb(){const kb=document.getElementById('wkb');kb.innerHTML='';
   [['1','2','3','4','5','6','7','8','9','0'],...KB].forEach(row=>{
