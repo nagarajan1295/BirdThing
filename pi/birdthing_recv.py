@@ -4,9 +4,10 @@
 # touching bird frequencies (birds are ~300 Hz and up), so unlike aggressive band/gate filtering it
 # doesn't cost detections. Runs on the BirdNET venv python (numpy+scipy). On ANY error it falls back
 # to plain passthrough so the pipeline can never break. Single writer to aplay.stdin (no deadlock).
-import socket, subprocess
+import socket, subprocess, time
 
 PORT = 9000
+_lastlvl = 0.0   # throttle for writing the current loudness to /tmp/bt_level
 LOOPDEV = "hw:Loopback,0,0"
 RATE = 48000
 HP = 250.0
@@ -38,6 +39,14 @@ def process(data):
         mono = (a[:, 0] + a[:, 1]) * 0.5
         y, S["zi"] = sosfilt(SOS, mono, zi=S["zi"])
         y = np.clip(y, -32768.0, 32767.0).astype("<i2")
+        global _lastlvl
+        t = time.time()
+        if t - _lastlvl > 0.4:                 # publish current loudness for the live indicator
+            _lastlvl = t
+            try:
+                open("/tmp/bt_level", "w").write(str(int(np.abs(y).max())))
+            except Exception:
+                pass
         st = np.empty((y.shape[0], 2), dtype="<i2")
         st[:, 0] = y
         st[:, 1] = y
