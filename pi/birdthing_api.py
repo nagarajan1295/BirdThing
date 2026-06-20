@@ -74,6 +74,15 @@ def geocode(q):
     except Exception:
         return []
 
+def _read_level():
+    # Current loudness the mic is hearing (written by the receiver). Used for a real-time
+    # "hearing a bird" indicator that reacts to sound, not to the (slower) BirdNET ID.
+    try:
+        return int(open("/tmp/bt_level").read().strip() or 0)
+    except Exception:
+        return 0
+
+
 def tz_off_min():
     # Pi local UTC offset in minutes east of UTC (e.g. EDT = -240). The Car Thing
     # has no RTC/NTP and a wrong clock+TZ, so the dashboard renders time from this.
@@ -95,10 +104,10 @@ def detections(limit=60):
             (rows[0]["date"],)).fetchone() if rows else (0, 0)
         con.close()
         return {"rows": rows, "today_count": today[0], "today_species": today[1],
-                "now": int(time.time() * 1000), "tzoff": tz_off_min()}
+                "now": int(time.time() * 1000), "tzoff": tz_off_min(), "level": _read_level()}
     except Exception as e:
         return {"rows": [], "today_count": 0, "today_species": 0, "err": str(e),
-                "now": int(time.time() * 1000), "tzoff": tz_off_min()}
+                "now": int(time.time() * 1000), "tzoff": tz_off_min(), "level": _read_level()}
 
 def by_date(days=7):
     try:
@@ -389,7 +398,13 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/" or self.path.startswith("/index"):
             try:
-                with open(HTML, "rb") as f: self._send(200, "text/html", f.read())
+                with open(HTML, "rb") as f: body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Cache-Control", "no-store, must-revalidate")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers(); self.wfile.write(body)
             except Exception as e:
                 self._send(500, "text/plain", str(e).encode())
         elif self.path.startswith("/api/detections"):

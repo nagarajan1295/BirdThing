@@ -348,6 +348,7 @@ async function refresh(){
   try{
     const d=await (await fetch('/api/detections',{cache:'no-store'})).json();
     if(d.now)setSrvTime(d.now,d.tzoff);
+    if((d.level||0)>3000)lastDetAt=Date.now();   // real-time "hearing a bird" from live loudness
     document.getElementById('stCount').textContent=d.today_count||0;
     document.getElementById('stSpecies').textContent=d.today_species||0;
     const nr=d.rows||[];
