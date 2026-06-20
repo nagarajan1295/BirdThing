@@ -42,12 +42,12 @@
     display:flex;flex-direction:column;}
   .hero .bg{position:absolute;inset:0;background-size:cover;background-position:center;
     filter:blur(34px) brightness(.4);transform:scale(1.25);}
-  .hero .photo{position:relative;flex:1;min-height:44%;background-size:contain;
+  .hero .photo{position:relative;flex:none;height:56%;background-size:contain;
     background-repeat:no-repeat;background-position:center;transition:opacity .45s ease;}
   .hero .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
     justify-content:center;gap:14px;color:var(--sec);}
   .hero .empty .big{font-size:64px;}
-  .hero .meta{position:relative;flex-shrink:0;padding:18px 24px 20px;
+  .hero .meta{position:relative;flex:1;min-height:0;overflow:hidden;padding:18px 24px 20px;
     background:linear-gradient(0deg,rgba(0,0,0,.92),rgba(0,0,0,.55) 55%,transparent);}
   .hero .com{font-size:calc(42px*min(var(--ts),1.35));font-weight:700;line-height:1.04;letter-spacing:-.02em;}
   .hero .sci{font-size:calc(19px*min(var(--ts),1.2));font-weight:400;color:#c7c7cc;font-style:italic;margin-top:5px;}
@@ -348,7 +348,6 @@ async function refresh(){
   try{
     const d=await (await fetch('/api/detections',{cache:'no-store'})).json();
     if(d.now)setSrvTime(d.now,d.tzoff);
-    if((d.level||0)>3000)lastDetAt=Date.now();   // real-time "hearing a bird" from live loudness
     document.getElementById('stCount').textContent=d.today_count||0;
     document.getElementById('stSpecies').textContent=d.today_species||0;
     const nr=d.rows||[];
