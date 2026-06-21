@@ -274,11 +274,23 @@ def wifi_scan():
         return []
 
 def wifi_connect(ssid, psk):
+    # Create the profile EXPLICITLY with the security type set, then bring it up. `nmcli dev wifi
+    # connect ... password ...` fails with "key-mgmt property is missing" when a profile for the SSID
+    # already exists, so we make our own named profile instead.
     try:
-        cmd = ["sudo", "nmcli", "dev", "wifi", "connect", ssid]
+        con = "bt-" + ssid
+        subprocess.run(["sudo", "nmcli", "con", "delete", con], capture_output=True)
         if psk:
-            cmd += ["password", psk]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+            add = ["sudo", "nmcli", "con", "add", "type", "wifi", "con-name", con, "ssid", ssid,
+                   "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk]
+        else:
+            add = ["sudo", "nmcli", "con", "add", "type", "wifi", "con-name", con, "ssid", ssid]
+        a = subprocess.run(add, capture_output=True, text=True, timeout=20)
+        if a.returncode != 0:
+            return {"ok": False, "msg": (a.stderr or a.stdout).strip()[:160]}
+        r = subprocess.run(["sudo", "nmcli", "con", "up", con], capture_output=True, text=True, timeout=45)
+        if r.returncode != 0:
+            subprocess.run(["sudo", "nmcli", "con", "delete", con], capture_output=True)
         return {"ok": r.returncode == 0, "msg": (r.stdout or r.stderr).strip()[:160]}
     except Exception as e:
         return {"ok": False, "msg": str(e)}
