@@ -244,7 +244,7 @@
     <div class="srow"><span class="sk">Appearance</span>
       <div class="seg2"><button onclick="setTheme('dark')" data-th="dark">Dark</button><button onclick="setTheme('light')" data-th="light">Light</button></div></div>
     <div class="srow"><span class="sk">Brightness <span id="bpct" style="color:var(--sec);font-weight:400"></span></span>
-      <div class="bwrap"><button class="bbtn" onclick="brightStep(-10)">−</button>
+      <div class="bwrap"><button class="bbtn" id="bAuto" style="width:auto;padding:13px 14px" onclick="setAuto(!brightAuto)">Auto</button><button class="bbtn" onclick="brightStep(-10)">−</button>
         <div class="slider" id="bbar" onclick="brightTap(event)"><div class="bfill" id="bfill"></div></div>
         <button class="bbtn" onclick="brightStep(10)">+</button></div>
       <span class="about" style="padding:2px 4px 0">Knob: scroll to the bar, <b>press to activate</b> (turns orange), turn to dim/brighten, press again to finish · or tap the bar.</span></div>
@@ -293,6 +293,7 @@ let dispOff=false;
 function toggleDisplay(){dispOff=!dispOff;fetch(CT+"/display?on="+(dispOff?0:1)).catch(()=>{});}
 const IMG=n=>"/api/image?name="+encodeURIComponent(n);
 let rows=[],sel=0,follow=true,factsOpen=false,heroTok=0,lastHeroUrl='',lastDetAt=0;
+let brightPct=parseInt(localStorage.getItem('brightPct')||'70')||70,brightAuto=localStorage.getItem('brightAuto')==='1',_lastAutoLvl=-1;
 // Clock/date come from the Pi (authoritative NTP time): the Car Thing has no RTC/NTP
 // and a wrong system clock + timezone, so we never trust the browser's local Date.
 const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -306,7 +307,8 @@ function tick(){
   let h=d.getUTCHours();const ap=h<12?'AM':'PM';const hh=(h%12)||12;
   document.getElementById('clock').textContent=hh+':'+String(d.getUTCMinutes()).padStart(2,'0')+' '+ap;
   document.getElementById('date').textContent=DAYS[d.getUTCDay()]+', '+MON[d.getUTCMonth()]+' '+d.getUTCDate();
-  const lt=document.getElementById('liveTxt');if(lt)lt.textContent=(Date.now()-lastDetAt<6000)?'Hearing a bird…':'Live';}
+  const lt=document.getElementById('liveTxt');if(lt)lt.textContent=(Date.now()-lastDetAt<6000)?'Hearing a bird…':'Live';
+  autoApply();}
 setInterval(tick,1000);tick();
 // detection timestamps -> 12-hour to match the top clock
 function fmt12(t){if(!t)return'';const p=t.split(':'),m=p[1]||'00';let h=+p[0];const ap=h<12?'AM':'PM';h=h%12;if(h===0)h=12;return h+':'+m+' '+ap;}
@@ -573,7 +575,7 @@ function setHi(){const o=setOpts();o.forEach((b,i)=>b.classList.toggle('khi',i==
 function setMove(d){const o=setOpts();if(!o.length)return;
   sliderActive=false;document.querySelectorAll('#settings .slider.active').forEach(s=>s.classList.remove('active'));
   setSel=(setSel+d+o.length)%o.length;setHi();}
-async function openSettings(){openView('settings');markSettings();applyBright();renderStats();
+async function openSettings(){openView('settings');markSettings();applyBright();markBrightAuto();renderStats();
   document.getElementById('about').innerHTML=
     `BirdThing · version <b>${VERSION}</b><br>Listens for birds with a Spotify Car Thing &amp; BirdNET.<br>Created by <b>Naga</b>.`;
   setSel=0;sliderActive=false;setTimeout(setHi,60);
@@ -593,15 +595,22 @@ async function renderStats(){
 // persisted prefs
 function setTs(v){document.documentElement.style.setProperty('--ts',v);localStorage.setItem('ts',v);markSettings();}
 function setTheme(t){document.body.classList.toggle('light',t==='light');localStorage.setItem('theme',t);markSettings();}
-let brightPct=parseInt(localStorage.getItem('brightPct')||'70');if(isNaN(brightPct))brightPct=70;
-function applyBright(){brightPct=Math.max(0,Math.min(100,brightPct));
+function applyBright(){brightPct=Math.max(10,Math.min(100,brightPct));   // floor 10% so it never blacks out
   const f=document.getElementById('bfill');if(f)f.style.width=brightPct+'%';
-  const p=document.getElementById('bpct');if(p)p.textContent=brightPct+'%';
+  const p=document.getElementById('bpct');if(p)p.textContent=brightPct+(brightAuto?'% · auto':'%');
   localStorage.setItem('brightPct',brightPct);
   fetch(CT+'/bright?level='+brightPct).catch(()=>{});}
-function brightStep(d){brightPct+=d;applyBright();}
-function brightTap(e){const r=document.getElementById('bbar').getBoundingClientRect();
-  brightPct=Math.round((e.clientX-r.left)/r.width*100);applyBright();}
+function manualBright(v){brightAuto=false;localStorage.setItem('brightAuto','0');markBrightAuto();brightPct=v;applyBright();}
+function brightStep(d){manualBright(brightPct+d);}
+function brightTap(e){const r=document.getElementById('bbar').getBoundingClientRect();manualBright(Math.round((e.clientX-r.left)/r.width*100));}
+// time-based auto (the ambient sensor is dead on this hardware): bright by day, dim at night
+function autoLevel(h){if(h>=8&&h<19)return 100;if(h>=6&&h<8)return 75;if(h>=19&&h<22)return 55;return 20;}
+function autoApply(force){if(!brightAuto)return;
+  const base=(srvOffMs!=null?Date.now()+srvOffMs:Date.now())+tzOffMin*60000;
+  const lvl=autoLevel(new Date(base).getUTCHours());
+  if(force||lvl!==_lastAutoLvl){_lastAutoLvl=lvl;brightPct=lvl;applyBright();}}
+function setAuto(on){brightAuto=on;localStorage.setItem('brightAuto',on?'1':'0');markBrightAuto();if(on)autoApply(true);}
+function markBrightAuto(){const b=document.getElementById('bAuto');if(b)b.classList.toggle('on',brightAuto);}
 function markSettings(){
   const ts=localStorage.getItem('ts')||'1',th=document.body.classList.contains('light')?'light':'dark';
   document.querySelectorAll('[data-ts]').forEach(b=>b.classList.toggle('on',b.dataset.ts===ts));
@@ -609,7 +618,7 @@ function markSettings(){
 }
 (function applySaved(){const ts=localStorage.getItem('ts');if(ts)document.documentElement.style.setProperty('--ts',ts);
   if(localStorage.getItem('theme')==='light')document.body.classList.add('light');
-  setTimeout(applyBright,1500);})();
+  setTimeout(()=>{markBrightAuto();if(brightAuto)autoApply(true);else applyBright();},1500);})();
 // stat cards tappable
 document.querySelectorAll('.stat').forEach(s=>s.onclick=openGallery);
 

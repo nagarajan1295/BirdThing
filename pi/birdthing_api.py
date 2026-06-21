@@ -363,13 +363,27 @@ def fetch_info(name):
     except Exception as e:
         return {"extract": "", "title": name, "err": str(e)}
 
+def _is_img(data):
+    # a real JPEG or PNG, big enough to be a photo (not an error page / partial download)
+    return bool(data) and len(data) > 1024 and (
+        data[:3] == b"\xff\xd8\xff" or data[:8] == b"\x89PNG\r\n\x1a\n")
+
+def _valid_cached(path):
+    try:
+        if os.path.getsize(path) < 1024:
+            return False
+        with open(path, "rb") as f:
+            return _is_img(f.read(16) + b" " * 1024)  # magic check only
+    except Exception:
+        return False
+
 def fetch_image(name):
     safe = "".join(c for c in name if c.isalnum() or c in " -").strip()
     path = os.path.join(CACHE, safe + ".jpg")
-    if os.path.exists(path) and os.path.getsize(path) > 0:
+    if _valid_cached(path):
         return path
     with _imglock:
-        if os.path.exists(path) and os.path.getsize(path) > 0:
+        if _valid_cached(path):
             return path
         try:
             api = ("https://en.wikipedia.org/api/rest_v1/page/summary/" +
@@ -381,9 +395,10 @@ def fetch_image(name):
             if url:
                 req2 = urllib.request.Request(url, headers={"User-Agent": "BirdThing/1.0"})
                 data = urllib.request.urlopen(req2, timeout=8).read()
-                with open(path, "wb") as f:
-                    f.write(data)
-                return path
+                if _is_img(data):                 # only cache a genuine image -> broken fetches retry
+                    with open(path, "wb") as f:
+                        f.write(data)
+                    return path
         except Exception:
             pass
     return None

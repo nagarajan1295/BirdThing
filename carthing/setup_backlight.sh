@@ -17,6 +17,7 @@ while :; do
   p=$(cat "$MODEF" 2>/dev/null)
   case "$p" in *[!0-9]*|"") p=70 ;; esac     # default 70% if unset / legacy keyword
   [ "$p" -gt 100 ] && p=100
+  [ "$p" -lt 8 ] && p=8                      # never fully black via brightness ('m' button blanks instead)
   raw=$(( p * MAX / 100 ))                    # desired physical brightness (100% = bright)
   target=$(clampw $(( MAX - raw )))           # INVERTED for this panel
   if [ "$cur" -lt 0 ]; then cur=$target; fi
