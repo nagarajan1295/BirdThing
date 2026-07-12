@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 # BirdThing dashboard API: serves recent BirdNET detections + bird photos for the
 # Car Thing 800x480 screen. Reads BirdNET-Pi's SQLite DB; proxies/caches Wikipedia photos.
-import sqlite3, os, json, urllib.request, urllib.parse, threading, time, subprocess
+import sqlite3, os, json, urllib.request, urllib.parse, urllib.error, threading, time, subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DB = "/home/birdpi/BirdNET-Pi/scripts/birds.db"
 HTML = "/opt/birdthing/birdthing-dashboard.html"
 CACHE = "/opt/birdthing/imgcache"
+import socket
+import time
+
+# The Pi's IPv6 route is broken (v6 TLS handshakes hang until timeout) while IPv4 works fine,
+# and urllib tries IPv6 first -> weather/wiki fetches "randomly" time out. Force IPv4 everywhere.
+_real_getaddrinfo = socket.getaddrinfo
+def _v4_getaddrinfo(host, port, family=0, *args, **kw):
+    return _real_getaddrinfo(host, port, socket.AF_INET, *args, **kw)
+socket.getaddrinfo = _v4_getaddrinfo
+
 WCONF = "/opt/birdthing/weather.json"
 PORT = 8090
 os.makedirs(CACHE, exist_ok=True)
@@ -42,21 +52,30 @@ def save_wconf(c):
     except Exception:
         pass
 
+_wx_last = None   # last successful weather payload (served during transient API outages)
+
 def weather():
+    global _wx_last
     c = load_wconf()
     try:
         url = ("https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
-               "&current=temperature_2m,weather_code" % (c["lat"], c["lon"]))
+               "&current=temperature_2m,weather_code,cloud_cover" % (c["lat"], c["lon"]))
         req = urllib.request.Request(url, headers={"User-Agent": "BirdThing/1.0"})
         cur = json.load(urllib.request.urlopen(req, timeout=8))["current"]
         tc = cur["temperature_2m"]; code = int(cur["weather_code"])
         temp = tc if c["unit"] == "C" else tc * 9 / 5 + 32
         icon, desc = WMO.get(code, ("\U0001f321️", "—"))
-        return {"temp": round(temp), "unit": c["unit"], "icon": icon,
-                "desc": desc, "place": c["place"]}
+        _wx_last = {"temp": round(temp), "unit": c["unit"], "icon": icon,
+                    "desc": desc, "place": c["place"],
+                    "lat": float(c["lat"]), "lon": float(c["lon"]),
+                    "cloud": cur.get("cloud_cover"), "at": time.time()}
+        return dict(_wx_last)
     except Exception as e:
+        if _wx_last and time.time() - _wx_last.get("at", 0) < 7200:   # serve stale up to 2h
+            out = dict(_wx_last); out["stale"] = True; return out
         return {"temp": None, "unit": c["unit"], "icon": "\U0001f321️",
-                "desc": "—", "place": c["place"], "err": str(e)}
+                "desc": "—", "place": c["place"],
+                "lat": float(c["lat"]), "lon": float(c["lon"]), "err": str(e)}
 
 def geocode(q):
     try:
@@ -229,6 +248,92 @@ def geoip():
     except Exception as e:
         return {"err": str(e)}
 
+def birdstatus():
+    st = {"lat": None, "lon": None, "sf": None, "place": ""}
+    try:
+        for line in open(BNCONF):
+            if line.startswith("LATITUDE="): st["lat"] = float(line.split("=", 1)[1])
+            elif line.startswith("LONGITUDE="): st["lon"] = float(line.split("=", 1)[1])
+            elif line.startswith("SF_THRESH="): st["sf"] = float(line.split("=", 1)[1])
+    except Exception:
+        pass
+    try:
+        st["place"] = json.load(open(BIRDLOC_FILE)).get("place", "")
+    except Exception:
+        pass
+    return st
+
+
+# ---- Microphone & bird-ID tuning ------------------------------------------------------------
+# gain -> MAX_GAIN and gate -> NOISE_FLOOR live in birdmic_ct.py ON THE CAR THING (reached over the
+# USB link); hp -> the receiver's high-pass (systemd env on the Pi); conf -> BirdNET CONFIDENCE.
+MICTUNE = "/opt/birdthing/mictune.json"
+
+def _ct_ssh(cmd, timeout=30):
+    # same channel the watchdog uses to poke the Car Thing's birdmic service
+    return subprocess.run(
+        ["sshpass", "-p", "superbird", "ssh", "-o", "StrictHostKeyChecking=no",
+         "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=8",
+         "superbird@192.168.7.2", cmd],
+        capture_output=True, timeout=timeout)
+
+def _mictune_load():
+    c = {"gain": 120, "gate": 25, "hp": 1, "conf": 0.80}
+    try:
+        c.update(json.load(open(MICTUNE)))
+    except Exception:
+        pass
+    # keep CONFIDENCE in sync with whatever birdnet.conf actually has (the geo-filter row edits it too)
+    try:
+        for line in open(BNCONF):
+            if line.startswith("CONFIDENCE="):
+                c["conf"] = float(line.split("=", 1)[1]); break
+    except Exception:
+        pass
+    return c
+
+def mictune_set(q):
+    c = _mictune_load()
+    for k, cast, lo, hi in (("gain", int, 20, 300), ("gate", int, 0, 200),
+                            ("hp", int, 0, 1), ("conf", float, 0.5, 0.95)):
+        if k in q:
+            try:
+                c[k] = min(hi, max(lo, cast(q[k][0])))
+            except Exception:
+                pass
+    try:
+        json.dump(c, open(MICTUNE, "w"))
+    except Exception:
+        pass
+    applied = {"mic": False, "recv": False, "birdnet": False}
+    # 1. BirdNET confidence (Pi birdnet.conf; restarts birdnet_analysis)
+    try:
+        applied["birdnet"] = _set_conf({"CONFIDENCE": "%.2f" % c["conf"]})
+    except Exception:
+        pass
+    # 2. rumble high-pass on the receiver (env override + restart; ~2 s audio gap)
+    try:
+        hz = "250" if c["hp"] else "0"
+        subprocess.run(["sudo", "bash", "-c",
+                        "mkdir -p /etc/systemd/system/birdthing-recv.service.d && "
+                        "printf '[Service]\\nEnvironment=HP_HZ=%s\\n' > /etc/systemd/system/birdthing-recv.service.d/tune.conf && "
+                        "systemctl daemon-reload && systemctl restart birdthing-recv" % hz],
+                       timeout=25, capture_output=True)
+        applied["recv"] = True
+    except Exception:
+        pass
+    # 3. gain (MAX_GAIN) + gate (NOISE_FLOOR) on the Car Thing mic node, then restart its birdmic
+    try:
+        remote = ("sudo sed -i 's/^MAX_GAIN = .*/MAX_GAIN = %d/' /opt/birdthing/birdmic_ct.py ; "
+                  "sudo sed -i 's/^NOISE_FLOOR = .*/NOISE_FLOOR = %d/' /opt/birdthing/birdmic_ct.py ; "
+                  "sudo systemctl restart birdmic" % (int(c["gain"]), int(c["gate"])))
+        r = _ct_ssh(remote, timeout=30)
+        applied["mic"] = r.returncode == 0
+    except Exception:
+        pass
+    c["applied"] = applied
+    return c
+
 BIRDLOC_FILE = "/opt/birdthing/birdloc.json"
 
 def _nm_unesc(s):
@@ -296,38 +401,49 @@ def wifi_connect(ssid, psk):
         return {"ok": False, "msg": str(e)}
 
 
-def analytics():
-    # Live "today" analytics for the on-screen view: volume, species, and a confidence-based
-    # quality proxy (high-confidence vs borderline = likely-false).
+def _day_stats(date, rows):
+    # rows: list of (Com_Name, Confidence, Time) for a single Date.
+    confs = [r[1] for r in rows]
+    sp = {}
+    for com, cf, _ in rows:
+        sp.setdefault(com, []).append(cf)
+    hourly = [0] * 24
+    for _, _, t in rows:
+        try:
+            hourly[int(t[:2])] += 1
+        except Exception:
+            pass
+    hi = sum(1 for c in confs if c >= 0.85)
+    bord = sum(1 for c in confs if 0.70 <= c < 0.80)
+    top = sorted(([k, len(v), round(sum(v) / len(v), 2)] for k, v in sp.items()),
+                 key=lambda x: -x[1])[:8]
+    return {"date": date, "detections": len(rows), "species": len(sp),
+            "conf_mean": round(sum(confs) / len(confs), 2),
+            "high_pct": round(100 * hi / len(confs)),
+            "bord_pct": round(100 * bord / len(confs)),
+            "hourly": hourly, "peak": hourly.index(max(hourly)), "top": top}
+
+def analytics(days=7):
+    # Per-day analytics for the on-screen report: today first, then previous days stacked
+    # below. Each day: volume, species, a confidence-based quality proxy (high-confidence vs
+    # borderline = likely-false), and the hourly activity chart.
     try:
         con = sqlite3.connect("file:%s?mode=ro" % DB, uri=True, timeout=5)
-        today = con.execute("SELECT MAX(Date) FROM detections").fetchone()[0]
-        rows = con.execute("SELECT Com_Name,Confidence,Time FROM detections WHERE Date=?",
-                           (today,)).fetchall()
+        dates = [r[0] for r in con.execute(
+            "SELECT DISTINCT Date FROM detections ORDER BY Date DESC LIMIT ?", (days,))]
+        buckets = {d: [] for d in dates}
+        if dates:
+            qs = ",".join("?" * len(dates))
+            for d, com, cf, t in con.execute(
+                    "SELECT Date,Com_Name,Confidence,Time FROM detections WHERE Date IN (%s)" % qs,
+                    dates):
+                if d in buckets:
+                    buckets[d].append((com, cf, t))
         con.close()
-        if not rows:
-            return {"date": today, "detections": 0, "species": 0}
-        confs = [r[1] for r in rows]
-        sp = {}
-        for com, cf, _ in rows:
-            sp.setdefault(com, []).append(cf)
-        hourly = [0] * 24
-        for _, _, t in rows:
-            try:
-                hourly[int(t[:2])] += 1
-            except Exception:
-                pass
-        hi = sum(1 for c in confs if c >= 0.85)
-        bord = sum(1 for c in confs if 0.70 <= c < 0.80)
-        top = sorted(([k, len(v), round(sum(v) / len(v), 2)] for k, v in sp.items()),
-                     key=lambda x: -x[1])[:8]
-        return {"date": today, "detections": len(rows), "species": len(sp),
-                "conf_mean": round(sum(confs) / len(confs), 2),
-                "high_pct": round(100 * hi / len(confs)),
-                "bord_pct": round(100 * bord / len(confs)),
-                "hourly": hourly, "peak": hourly.index(max(hourly)), "top": top}
+        out = [_day_stats(d, buckets[d]) for d in dates if buckets[d]]
+        return {"days": out}
     except Exception as e:
-        return {"date": "", "detections": 0, "species": 0, "err": str(e)}
+        return {"days": [], "err": str(e)}
 
 
 def play_pi(name):
@@ -352,6 +468,99 @@ def stop_pi():
     except Exception:
         pass
     return {"ok": True}
+
+
+# ---- Spotify (Web API remote: shows what's playing on the user's phone/Alexa + controls it) ----
+# Audio plays on the user's own Spotify Connect device; the display is a remote only.
+# Creds in spotify.json next to this file: {"client_id": "...", "refresh_token": "..."}
+# (Authorization Code + PKCE — no client secret stored).
+SP_CONF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spotify.json")
+_sp = {"access": None, "exp": 0, "playing": False}
+
+def _sp_conf():
+    try:
+        return json.load(open(SP_CONF))
+    except Exception:
+        return None
+
+def _sp_token():
+    if _sp["access"] and time.time() < _sp["exp"] - 60:
+        return _sp["access"]
+    c = _sp_conf()
+    if not c or not c.get("refresh_token") or not c.get("client_id"):
+        return None
+    data = urllib.parse.urlencode({"grant_type": "refresh_token",
+        "refresh_token": c["refresh_token"], "client_id": c["client_id"]}).encode()
+    try:
+        req = urllib.request.Request("https://accounts.spotify.com/api/token", data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"})
+        tok = json.load(urllib.request.urlopen(req, timeout=8))
+    except Exception:
+        return None
+    _sp["access"] = tok.get("access_token")
+    _sp["exp"] = time.time() + tok.get("expires_in", 3600)
+    if tok.get("refresh_token") and tok["refresh_token"] != c["refresh_token"]:
+        c["refresh_token"] = tok["refresh_token"]      # Spotify rotates refresh tokens under PKCE
+        try: json.dump(c, open(SP_CONF, "w"))
+        except Exception: pass
+    return _sp["access"]
+
+def _sp_api(method, path, timeout=8):
+    t = _sp_token()
+    if not t:
+        return None, 401
+    req = urllib.request.Request("https://api.spotify.com/v1" + path, method=method,
+        headers={"Authorization": "Bearer " + t})
+    try:
+        r = urllib.request.urlopen(req, timeout=timeout)
+        body = r.read()
+        return (json.loads(body) if body else None), r.status
+    except urllib.error.HTTPError as e:
+        return None, e.code
+    except Exception:
+        return None, 0
+
+def spotify_status():
+    if not _sp_conf():
+        return {"available": False, "err": "not-configured"}
+    data, code = _sp_api("GET", "/me/player")
+    if code == 401:
+        return {"available": False, "err": "auth"}
+    if code == 204 or not data:                 # nothing playing / no active device
+        return {"available": True, "playing": False}
+    item = data.get("item") or {}
+    imgs = (item.get("album") or {}).get("images") or []
+    dev = data.get("device") or {}
+    _sp["playing"] = bool(data.get("is_playing"))
+    return {"available": True, "playing": _sp["playing"],
+            "title": item.get("name"),
+            "artist": ", ".join(a["name"] for a in item.get("artists", [])) or None,
+            "album": (item.get("album") or {}).get("name"),
+            "art": imgs[0]["url"] if imgs else None,
+            "dur_ms": item.get("duration_ms") or 0,
+            "pos_ms": data.get("progress_ms") or 0,
+            "volume": dev.get("volume_percent"),
+            "device": dev.get("name")}
+
+def spotify_cmd(c):
+    if c == "playpause":
+        c = "pause" if _sp["playing"] else "play"
+    routes = {"play": ("PUT", "/me/player/play"), "pause": ("PUT", "/me/player/pause"),
+              "next": ("POST", "/me/player/next"), "prev": ("POST", "/me/player/previous"),
+              "previous": ("POST", "/me/player/previous")}
+    if c not in routes:
+        return {"ok": False, "err": "bad-cmd"}
+    m, p = routes[c]
+    _, code = _sp_api(m, p)
+    if c in ("play", "pause"):
+        _sp["playing"] = (c == "play")
+    return {"ok": code in (200, 202, 204), "code": code}
+
+def spotify_vol(v):
+    try: v = max(0, min(100, int(v)))
+    except Exception: return {"ok": False, "err": "bad-vol"}
+    _, code = _sp_api("PUT", "/me/player/volume?volume_percent=%d" % v)
+    return {"ok": code in (200, 202, 204), "volume": v, "code": code}
 
 
 def fetch_info(name):
@@ -446,6 +655,8 @@ class H(BaseHTTPRequestHandler):
             self._send(200, "application/json", json.dumps(song(name)).encode())
         elif self.path.startswith("/api/geoip"):
             self._send(200, "application/json", json.dumps(geoip()).encode())
+        elif self.path.startswith("/api/birdstatus"):
+            self._send(200, "application/json", json.dumps(birdstatus()).encode())
         elif self.path.startswith("/api/birdloc"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, "application/json", json.dumps(birdloc(
@@ -453,6 +664,11 @@ class H(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/sf"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, "application/json", json.dumps(set_sf(q.get("t", ["0.03"])[0])).encode())
+        elif self.path.startswith("/api/mictune/set"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, "application/json", json.dumps(mictune_set(q)).encode())
+        elif self.path.startswith("/api/mictune"):
+            self._send(200, "application/json", json.dumps(_mictune_load()).encode())
         elif self.path.startswith("/api/wifi/scan"):
             self._send(200, "application/json", json.dumps(wifi_scan()).encode())
         elif self.path.startswith("/api/wifi/connect"):
@@ -469,6 +685,14 @@ class H(BaseHTTPRequestHandler):
             self._send(200, "application/json", json.dumps(play_pi(name)).encode())
         elif self.path.startswith("/api/stop_pi"):
             self._send(200, "application/json", json.dumps(stop_pi()).encode())
+        elif self.path.startswith("/api/spotify/cmd"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, "application/json", json.dumps(spotify_cmd(q.get("c", [""])[0])).encode())
+        elif self.path.startswith("/api/spotify/vol"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, "application/json", json.dumps(spotify_vol(q.get("v", ["50"])[0])).encode())
+        elif self.path.startswith("/api/spotify"):
+            self._send(200, "application/json", json.dumps(spotify_status()).encode())
         elif self.path.startswith("/api/info"):
             q = urllib.parse.urlparse(self.path).query
             name = urllib.parse.parse_qs(q).get("name", [""])[0]

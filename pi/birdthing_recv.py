@@ -4,29 +4,54 @@
 # touching bird frequencies (birds are ~300 Hz and up), so unlike aggressive band/gate filtering it
 # doesn't cost detections. Runs on the BirdNET venv python (numpy+scipy). On ANY error it falls back
 # to plain passthrough so the pipeline can never break. Single writer to aplay.stdin (no deadlock).
-import socket, subprocess, time
+import socket, subprocess, time, os
 
 PORT = 9000
 _lastlvl = 0.0   # throttle for writing the current loudness to /tmp/bt_level
 LOOPDEV = "hw:Loopback,0,0"
 RATE = 48000
-HP = 250.0
+# HP_HZ is set by the dashboard's mic-tuning "Rumble filter" toggle (systemd env drop-in).
+# 0 (or unset<=0) = raw passthrough; otherwise the high-pass cutoff in Hz.
+HP = float(os.environ.get("HP_HZ", "250"))
 ORDER = 4
 
-OK = True
+OK = HP > 0          # apply the high-pass; if off we still publish the loudness level below
+HAVE_NP = False
 try:
     import numpy as np
     from scipy.signal import butter, sosfilt, sosfilt_zi
-    SOS = butter(ORDER, HP, btype="highpass", fs=RATE, output="sos")
-    S = {"zi": sosfilt_zi(SOS), "buf": b""}
-    print("high-pass %d Hz active (rumble removal)" % HP, flush=True)
+    HAVE_NP = True
+    if OK:
+        SOS = butter(ORDER, HP, btype="highpass", fs=RATE, output="sos")
+        S = {"zi": sosfilt_zi(SOS), "buf": b""}
+        print("high-pass %d Hz active (rumble removal)" % HP, flush=True)
+    else:
+        print("rumble filter off (raw passthrough)", flush=True)
 except Exception as e:
     print("filter disabled (passthrough):", e, flush=True)
     OK = False
 
 
+def _publish_level(data):
+    # write the current peak loudness for the dashboard's live "Listening…" indicator
+    global _lastlvl
+    if not HAVE_NP:
+        return
+    t = time.time()
+    if t - _lastlvl <= 0.4:
+        return
+    _lastlvl = t
+    try:
+        a = np.frombuffer(data[:len(data) // 4 * 4], dtype="<i2")
+        if a.size:
+            open("/tmp/bt_level", "w").write(str(int(np.abs(a).max())))
+    except Exception:
+        pass
+
+
 def process(data):
     if not OK:
+        _publish_level(data)               # rumble filter off: still report loudness
         return data
     try:
         raw = S["buf"] + data

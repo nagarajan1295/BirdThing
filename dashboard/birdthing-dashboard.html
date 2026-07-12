@@ -13,6 +13,8 @@
     --bg:#000;--card:rgba(255,255,255,.07);--card2:rgba(255,255,255,.12);
     --fg:#f5f5f7;--sec:#86868b;--hair:rgba(255,255,255,.10);--green:#30d158;
     --ts:1;
+    --tst:min(var(--ts),1.85);  /* top-bar text scale: rises with --ts (so XXL > XL) but capped to stay in the bar */
+    --toph:calc(30px + 12px*var(--tst));  /* bar grows taller with the text so big sizes don't overlap */
   }
   body.light{
     --bg:#f2f2f7;--card:rgba(0,0,0,.05);--card2:rgba(0,0,0,.12);
@@ -23,14 +25,19 @@
     font-family:'Inter',-apple-system,system-ui,"Helvetica Neue",sans-serif;
     -webkit-font-smoothing:antialiased;user-select:none;cursor:none;
     letter-spacing:-.01em;}
-  #app{display:grid;grid-template-columns:472px 328px;grid-template-rows:42px 438px;
+  #app{display:grid;grid-template-columns:472px 328px;grid-template-rows:var(--toph) calc(480px - var(--toph));
     width:800px;height:480px;}
-  /* slim top bar, no brand */
-  .top{grid-column:1/3;display:flex;align-items:center;justify-content:space-between;
-    padding:0 20px;}
-  .wx{display:flex;align-items:center;gap:7px;font-size:calc(17px*var(--ts));color:var(--fg);font-weight:500;}
-  .wx #wxIcon{font-size:calc(19px*var(--ts));}
-  .tr{display:flex;align-items:center;gap:14px;color:var(--sec);font-size:calc(16px*var(--ts));font-weight:500;}
+  /* slim top bar, no brand — PINNED so weather+time stay visible over every view */
+  .top{position:fixed;top:0;left:0;width:800px;height:var(--toph);z-index:40;background:var(--bg);
+    display:flex;align-items:center;justify-content:space-between;padding:0 20px;}
+  .np{display:flex;align-items:center;gap:8px;max-width:430px;overflow:hidden;
+    font-size:calc(15px*var(--tst));font-weight:500;color:var(--fg);}
+  .np #npText{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .npico{color:var(--green);font-size:calc(16px*var(--tst));}
+  .wx{display:flex;align-items:center;gap:7px;font-size:calc(17px*var(--tst));color:var(--fg);font-weight:500;}
+  .wx #wxIcon{font-size:calc(19px*var(--tst));display:inline-flex;align-items:center;}
+  .wx #wxIcon svg{width:1.2em;height:1.2em;display:block;}
+  .tr{display:flex;align-items:center;gap:14px;color:var(--sec);font-size:calc(16px*var(--tst));font-weight:500;white-space:nowrap;}
   .live{display:flex;align-items:center;gap:7px;color:var(--green);}
   .dot{width:9px;height:9px;border-radius:50%;background:var(--green);
     box-shadow:0 0 0 0 rgba(48,209,88,.5);animation:pulse 2s infinite;}
@@ -38,7 +45,7 @@
   #clock{color:var(--fg);font-variant-numeric:tabular-nums;}
   #date{color:var(--sec);}
   /* HERO */
-  .hero{position:relative;margin:6px 10px 14px 16px;border-radius:24px;overflow:hidden;background:#0c0c0e;
+  .hero{position:relative;grid-row:2;grid-column:1;margin:6px 10px 14px 16px;border-radius:24px;overflow:hidden;background:#0c0c0e;
     display:flex;flex-direction:column;}
   .hero .bg{position:absolute;inset:0;background-size:cover;background-position:center;
     filter:blur(34px) brightness(.4);transform:scale(1.25);}
@@ -56,7 +63,7 @@
     padding:5px 13px;border-radius:30px;}
   .hero .when{font-size:calc(16px*min(var(--ts),1.2));color:#c7c7cc;font-weight:500;}
   /* LIST */
-  aside{margin:6px 16px 14px 6px;display:flex;flex-direction:column;min-height:0;}
+  aside{grid-row:2;grid-column:2;margin:6px 16px 14px 6px;display:flex;flex-direction:column;min-height:0;}
   .stats{display:flex;gap:8px;margin-bottom:10px;}
   .stat{flex:1;background:var(--card);border-radius:16px;padding:11px 15px;}
   .stat .n{font-size:calc(30px*var(--ts));font-weight:700;line-height:1;letter-spacing:-.02em;}
@@ -70,7 +77,7 @@
   .item .th{width:50px;height:50px;border-radius:13px;object-fit:cover;background:#1c1c1e;flex-shrink:0;}
   .item .info{flex:1;min-width:0;}
   .item .nm{font-size:calc(20px*var(--ts));font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .item .tm{font-size:calc(14px*var(--ts));color:var(--sec);font-weight:400;margin-top:2px;}
+  .item .tm{font-size:calc(14px*var(--ts));color:var(--sec);font-weight:400;margin-top:2px;white-space:nowrap;}
   .item .cf{font-size:calc(17px*var(--ts));color:var(--sec);font-weight:600;}
   /* FACTS */
   #facts{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;z-index:25;
@@ -129,11 +136,11 @@
   /* gallery: per-day boxes with bird cards */
   .daybox{margin-bottom:16px;}
   .daybox .dlabel{font-size:15px;font-weight:600;color:var(--sec);margin:0 4px 8px;text-transform:uppercase;letter-spacing:.5px;}
-  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+  .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
   .bcard{background:var(--card);border-radius:16px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;}
   .bcard img{width:100%;height:78px;object-fit:cover;border-radius:11px;background:var(--card2);}
   .bcard .bn{font-size:calc(14px*var(--ts));font-weight:600;text-align:center;line-height:1.15;
-    max-height:2.4em;overflow:hidden;}
+    max-height:2.4em;overflow:hidden;overflow-wrap:anywhere;word-break:break-word;}
   .bcard .bc{font-size:16px;font-weight:700;color:var(--green);}
   /* live view */
   #live .lwrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center;}
@@ -153,13 +160,24 @@
   .seg2 button{background:transparent;color:var(--fg);border:none;font-size:calc(17px*var(--ts));font-weight:600;
     padding:13px 24px;border-radius:9px;font-family:inherit;}
   .khi{outline:3px solid var(--green);outline-offset:1px;}
-  .bwrap{display:flex;align-items:center;gap:10px;width:100%;}
-  .slider{flex:1;height:30px;background:var(--card);border-radius:15px;overflow:hidden;}
+  .bwrap{display:flex;align-items:center;gap:10px;width:100%;flex-wrap:wrap;}
+  .slider{flex:1;min-width:140px;height:30px;background:var(--card);border-radius:15px;overflow:hidden;}
   .bfill{height:100%;background:var(--green);border-radius:15px;transition:width .12s ease;}
   .slider.active{outline:3px solid #ff9f0a;outline-offset:2px;}
   .slider.active .bfill{background:#ff9f0a;}
-  .bbtn{background:var(--card2);border:none;color:var(--fg);font-size:calc(24px*var(--ts));font-weight:700;
-    width:56px;height:46px;border-radius:11px;font-family:inherit;flex:0 0 auto;}
+  .mtl{font-size:calc(16px*var(--ts));font-weight:600;margin-top:8px;}
+  .mtv{color:var(--sec);font-weight:400;}
+  .mtbar{flex:0 0 auto;width:100%;min-width:0;height:36px;margin-top:8px;border-radius:18px;
+    background:var(--card);box-shadow:inset 0 0 0 2px var(--hair);}
+  .mtbar .bfill{border-radius:18px;}
+  body.light .mtbar{box-shadow:inset 0 0 0 2px rgba(0,0,0,.18);}
+  /* pull-to-refresh pill: swipe down from the top to reload */
+  #ptr{position:fixed;top:6px;left:50%;transform:translate(-50%,0);background:var(--card);color:var(--fg);
+    padding:10px 20px;border-radius:22px;opacity:0;z-index:99998;transition:opacity .15s;font-size:16px;
+    pointer-events:none;box-shadow:0 4px 18px rgba(0,0,0,.4);}
+  .bbtn{background:var(--card2);border:none;color:var(--fg);font-size:calc(22px*min(var(--ts),1.3));font-weight:700;
+    width:56px;min-height:46px;height:auto;border-radius:11px;font-family:inherit;flex:0 0 auto;line-height:1.1;padding:11px 0;
+    display:flex;align-items:center;justify-content:center;}
   .seg2 button.on{background:var(--card2);}
   .chart{display:flex;align-items:flex-end;gap:3px;height:120px;padding:10px 6px 0;}
   .chart .bar{flex:1;background:var(--green);border-radius:4px 4px 0 0;min-height:2px;opacity:.85;}
@@ -168,6 +186,27 @@
   .xax span{flex:1;text-align:center;font-size:11px;color:var(--sec);}
   .about{font-size:17px;color:var(--sec);line-height:1.7;padding:10px 6px;}
   .about b{color:var(--fg);font-weight:600;}
+  /* keep the pinned 42px top bar clear on every full-screen overlay */
+  #facts,#wxset,.view{padding-top:42px;}
+  /* SPOTIFY now-playing view */
+  #spotify .sp{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:6px 24px 24px;text-align:center;}
+  .spArt{width:190px;height:190px;border-radius:20px;background:#1c1c1e center/cover no-repeat;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);flex:0 0 auto;}
+  .spTitle{font-size:calc(26px*min(var(--ts),1.4));font-weight:700;letter-spacing:-.02em;
+    max-width:92%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .spArtist{font-size:calc(18px*min(var(--ts),1.3));color:var(--sec);font-weight:500;margin-top:-6px;}
+  .spBar{width:100%;max-width:420px;height:6px;background:var(--card);border-radius:3px;overflow:hidden;}
+  .spFill{height:100%;width:0;background:var(--green);border-radius:3px;transition:width .9s linear;}
+  .spTimes{width:100%;max-width:420px;display:flex;justify-content:space-between;
+    font-size:13px;color:var(--sec);font-variant-numeric:tabular-nums;margin-top:-6px;}
+  .spCtl{display:flex;align-items:center;gap:26px;margin-top:4px;}
+  .spVol{display:flex;align-items:center;gap:12px;width:100%;max-width:320px;justify-content:center;}
+  .spBtn{background:var(--card);border:none;color:var(--fg);font-size:26px;width:62px;height:54px;
+    border-radius:14px;font-family:inherit;transition:transform .14s ease,background .2s ease;}
+  .spBtn:active{transform:scale(.94);background:var(--card2);}
+  .spBtn.big{font-size:30px;width:78px;height:62px;background:var(--green);color:#000;}
+  .spBtn.sm{font-size:20px;width:50px;height:44px;}
   /* fluid press feedback */
   .item,.bcard,.stat,.seg2 button,.seg button,.key,.fclose,.vclose,.wclose{transition:transform .14s ease,background .2s ease;}
   .item:active,.bcard:active,.stat:active,.seg2 button:active,.seg button:active,.key:active,.fclose:active,.vclose:active,.wclose:active{transform:scale(.97);}
@@ -176,8 +215,9 @@
 <body>
 <div id="app">
   <div class="top">
-    <div class="wx" id="wx" onclick="openWx()"><span id="wxIcon">🌡️</span><span id="wxTemp">--°</span></div>
-    <div class="tr"><div id="date"></div><div class="live"><div class="dot"></div><span id="liveTxt">Live</span></div><div id="clock">--:--</div></div>
+    <div class="wx" id="wx" onclick="openWx()"><span id="wxIcon"></span><span id="wxTemp">--°</span></div>
+    <div class="np" id="np" onclick="openSpotify()" style="display:none"><span class="npico">♫</span><span id="npText"></span></div>
+    <div class="tr"><div id="date" onclick="openYear()"></div><div class="live"><div class="dot"></div><span id="liveTxt">Live</span></div><div id="clock" onclick="openClock()">--:--</div></div>
   </div>
   <div class="hero" id="hero" onclick="openFacts()">
     <div class="bg" id="heroBg"></div>
@@ -235,6 +275,23 @@
     <div class="lconf" id="liveConf"></div>
   </div>
 </div>
+<div id="spotify" class="view">
+  <div class="vhead"><div class="vtitle">Spotify</div><div class="vclose" onclick="closeView('spotify')">Back</div></div>
+  <div class="sp">
+    <div class="spArt" id="spArt"></div>
+    <div class="spTitle" id="spTitle">Spotify not connected</div>
+    <div class="spArtist" id="spArtist"></div>
+    <div class="spBar"><div class="spFill" id="spFill"></div></div>
+    <div class="spTimes"><span id="spPos">0:00</span><span id="spDur">0:00</span></div>
+    <div class="spCtl">
+      <button class="spBtn" onclick="spCmd('prev')">⏮</button>
+      <button class="spBtn big" id="spPlay" onclick="spCmd('playpause')">▶</button>
+      <button class="spBtn" onclick="spCmd('next')">⏭</button>
+    </div>
+    <div class="spVol"><button class="spBtn sm" onclick="spVol(-10)">🔉</button><div class="slider" style="max-width:240px;height:30px"><div class="bfill" id="spVolFill"></div></div><button class="spBtn sm" onclick="spVol(10)">🔊</button></div>
+    <div class="about" id="spHint" style="text-align:center;padding-top:0"></div>
+  </div>
+</div>
 <div id="settings" class="view">
   <div class="vhead"><div class="vtitle">Settings</div><div class="vclose" onclick="closeView('settings')">Back</div></div>
   <div class="vbody">
@@ -248,15 +305,28 @@
         <div class="slider" id="bbar" onclick="brightTap(event)"><div class="bfill" id="bfill"></div></div>
         <button class="bbtn" onclick="brightStep(10)">+</button></div>
       <span class="about" style="padding:2px 4px 0">Knob: scroll to the bar, <b>press to activate</b> (turns orange), turn to dim/brighten, press again to finish · or tap the bar.</span></div>
+    <div class="srow"><span class="sk">Music</span>
+      <div class="seg2"><button onclick="openSpotify()">Open Spotify</button></div></div>
     <div class="srow"><span class="sk">Analytics</span>
       <div class="seg2"><button onclick="openAnalytics()">Open today's report</button></div></div>
     <div class="srow"><span class="sk">Wi‑Fi</span>
       <div class="seg2"><button onclick="openWifi()">Change network</button></div></div>
     <div class="srow"><span class="sk">Bird region</span>
-      <div class="seg2"><button onclick="detectLoc()">Auto‑detect</button><button onclick="setLoc(40.71,-74.01,'New York')">New York</button><button onclick="setLoc(39.83,-98.58,'North America')">N. America</button><button onclick="setLoc(51.51,-0.13,'UK')">UK</button><button onclick="setLoc(20.59,78.96,'India')">India</button><button onclick="setLoc(-25.27,133.78,'Australia')">Australia</button></div></div>
+      <div class="seg2"><button id="regAuto" onclick="detectLoc()">Auto‑detect</button><button data-reg="New York" onclick="setLoc(40.7128,-74.0060,'New York')">New York</button><button data-reg="North America" onclick="setLoc(39.83,-98.58,'North America')">N. America</button><button data-reg="UK" onclick="setLoc(51.51,-0.13,'UK')">UK</button><button data-reg="India" onclick="setLoc(20.59,78.96,'India')">India</button><button data-reg="Australia" onclick="setLoc(-25.27,133.78,'Australia')">Australia</button></div></div>
     <div class="srow"><span class="sk">Geo filter — precision vs. catch‑all</span>
-      <div class="seg2"><button onclick="setSf(0.03)">Strict</button><button onclick="setSf(0.01)">Loose</button><button onclick="setSf(0)">Off (catch‑all)</button></div>
+      <div class="seg2"><button data-sf="0.08" onclick="setSf(0.08)">Strict</button><button data-sf="0.03" onclick="setSf(0.03)">Loose</button><button data-sf="0" onclick="setSf(0)">Off (catch‑all)</button></div>
       <span class="about" id="locNote" style="padding:4px 4px 0"></span></div>
+    <div class="srow"><span class="sk">Microphone &amp; bird ID</span>
+      <span class="about" style="padding:0 0 2px">Tune what the Car Thing mic hears and how sure BirdNET must be. Changes apply live (analyzer restarts, ~5 s).</span>
+      <div class="mtl">Mic sensitivity <span class="mtv" id="mtGainV"></span></div>
+      <div class="slider mtbar" id="mtGain"><div class="bfill" id="mtGainF"></div></div>
+      <div class="mtl">Noise gate <span class="mtv" id="mtGateV"></span></div>
+      <div class="slider mtbar" id="mtGate"><div class="bfill" id="mtGateF"></div></div>
+      <div class="mtl">Rumble filter <span class="mtv" id="mtHpV"></span></div>
+      <div class="seg2"><button data-hp="1" onclick="mtHp(1)">On</button><button data-hp="0" onclick="mtHp(0)">Off</button></div>
+      <div class="mtl">ID strictness <span class="mtv" id="mtConfV"></span></div>
+      <div class="slider mtbar" id="mtConf"><div class="bfill" id="mtConfF"></div></div>
+      <div class="about" id="mtStatus" style="padding:4px 0 0"></div></div>
     <div class="srow" style="border:none;flex-direction:column;align-items:flex-start;gap:8px">
       <span class="sk">Today's activity</span>
       <div class="chart" id="chart" style="width:100%"></div>
@@ -285,6 +355,30 @@
     </div>
   </div>
 </div>
+<div id="clockview" class="view">
+  <div class="vhead"><div class="vtitle">Clock</div><div class="vclose" onclick="closeView('clockview')">Back</div></div>
+  <div class="vbody" style="display:flex;align-items:center;justify-content:center;padding:6px 22px;overflow:hidden;">
+   <div id="clockWrap" style="display:flex;align-items:center;justify-content:center;gap:34px;width:max-content;flex:0 0 auto;">
+    <svg id="anaClock" viewBox="0 0 200 200" style="height:300px;flex:0 0 auto;aspect-ratio:1;">
+      <circle cx="100" cy="100" r="97" fill="var(--card)" stroke="var(--hair)" stroke-width="2"/>
+      <g id="anaTicks"></g>
+      <line id="anaH" x1="100" y1="100" x2="100" y2="56" stroke="var(--fg)" stroke-width="7" stroke-linecap="round"/>
+      <line id="anaM" x1="100" y1="100" x2="100" y2="32" stroke="var(--fg)" stroke-width="4" stroke-linecap="round"/>
+      <line id="anaS" x1="100" y1="106" x2="100" y2="26" stroke="var(--green)" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="100" cy="100" r="5" fill="var(--green)"/>
+    </svg>
+    <div style="text-align:center;flex:0 0 auto;">
+      <div id="digTime" style="font-size:62px;font-weight:800;letter-spacing:-.02em;"></div>
+      <div id="digDate" style="font-size:21px;color:var(--sec);margin-top:6px;"></div>
+    </div>
+    <div id="monthCal" style="flex:0 0 auto;"></div>
+   </div>
+  </div>
+</div>
+<div id="yearview" class="view">
+  <div class="vhead"><div class="vtitle" id="yearTitle">Year</div><div class="vclose" onclick="closeView('yearview')">Back</div></div>
+  <div class="vbody" id="yearBody" style="display:flex;justify-content:center;align-items:center;padding:4px 18px 14px;overflow:hidden;"></div>
+</div>
 <script>
 const VERSION="1.0 (USB)";
 const CT="http://127.0.0.1:8091";
@@ -293,7 +387,13 @@ let dispOff=false;
 function toggleDisplay(){dispOff=!dispOff;fetch(CT+"/display?on="+(dispOff?0:1)).catch(()=>{});}
 const IMG=n=>"/api/image?name="+encodeURIComponent(n);
 let rows=[],sel=0,follow=true,factsOpen=false,heroTok=0,lastHeroUrl='',lastDetAt=0;
+// two-stage live indicator: "Listening…" the instant sound is heard, "Hearing a bird…" once BirdNET
+// positively IDs it. noiseFloor adapts to ambient (snaps down to quiet, creeps up slowly) so the
+// sound threshold works day or night; soundUntil holds "Listening…" briefly so it doesn't flicker.
+let noiseFloor=40,soundUntil=0;
 let brightPct=parseInt(localStorage.getItem('brightPct')||'70')||70,brightAuto=localStorage.getItem('brightAuto')==='1',_lastAutoLvl=-1;
+let luLat=null,luLon=null,luCloud=null;   // device lat/lon + cloud%, from /api/weather (for solar auto-brightness)
+const AB_DAY=100,AB_NIGHT=12,AB_HI=8,AB_LO=-6;   // full bright above +8deg sun elevation, night floor below -6deg
 // Clock/date come from the Pi (authoritative NTP time): the Car Thing has no RTC/NTP
 // and a wrong system clock + timezone, so we never trust the browser's local Date.
 const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -307,7 +407,9 @@ function tick(){
   let h=d.getUTCHours();const ap=h<12?'AM':'PM';const hh=(h%12)||12;
   document.getElementById('clock').textContent=hh+':'+String(d.getUTCMinutes()).padStart(2,'0')+' '+ap;
   document.getElementById('date').textContent=DAYS[d.getUTCDay()]+', '+MON[d.getUTCMonth()]+' '+d.getUTCDate();
-  const lt=document.getElementById('liveTxt');if(lt)lt.textContent=(Date.now()-lastDetAt<6000)?'Hearing a bird…':'Live';
+  const lt=document.getElementById('liveTxt');
+  if(lt)lt.textContent=(Date.now()-lastDetAt<6000)?'Hearing a bird…':(Date.now()<soundUntil?'Listening…':'Live');
+  if(typeof updClock==='function')updClock();   // live analog/digital clock when the view is open
   autoApply();}
 setInterval(tick,1000);tick();
 // detection timestamps -> 12-hour to match the top clock
@@ -350,6 +452,10 @@ async function refresh(){
   try{
     const d=await (await fetch('/api/detections',{cache:'no-store'})).json();
     if(d.now)setSrvTime(d.now,d.tzoff);
+    if(typeof d.level==='number'){                         // live mic loudness -> "Listening…"
+      noiseFloor=Math.min(d.level,noiseFloor+3);           // track ambient: snap to quiet, creep up
+      if(d.level>Math.max(200,noiseFloor*4))soundUntil=Date.now()+2200;
+    }
     document.getElementById('stCount').textContent=d.today_count||0;
     document.getElementById('stSpecies').textContent=d.today_species||0;
     const nr=d.rows||[];
@@ -409,6 +515,9 @@ function btnNav(k){ // top buttons 1-4 switch views from anywhere
 }
 document.addEventListener('keydown',(ev)=>{
   const k=ev.key;
+  // arrows are handled explicitly below (nav / slider / manual scroll) — stop the browser's
+  // own arrow-key scrolling so adjusting the brightness slider doesn't also scroll the view
+  if(k==='ArrowDown'||k==='ArrowUp'||k==='ArrowLeft'||k==='ArrowRight')ev.preventDefault();
   if(k==='m'||k==='M'){if(!ev.repeat)toggleDisplay();return;}
   if(document.getElementById('wxset').classList.contains('show')){if(k==='Escape'||k==='Backspace')closeWx();return;}
   if(btnNav(k))return;
@@ -423,16 +532,25 @@ document.addEventListener('keydown',(ev)=>{
     if(v==='settings'){
       const o=setOpts()[setSel];
       const onSlider=o&&o.classList.contains('slider');
-      if(onSlider&&sliderActive){              // ACTIVE: knob turns adjust brightness
-        if(k==='ArrowDown'||k==='ArrowRight'){brightStep(5);return;}
-        if(k==='ArrowUp'||k==='ArrowLeft'){brightStep(-5);return;}
+      if(onSlider&&sliderActive){              // ACTIVE: knob turns adjust THIS slider (brightness or a mic bar)
         if(k==='Enter'||k==='Escape'||k==='Backspace'){sliderActive=false;o.classList.remove('active');return;}
+        const dir=(k==='ArrowDown'||k==='ArrowRight')?1:(k==='ArrowUp'||k==='ArrowLeft')?-1:0;
+        if(dir){if(o.id==='bbar')brightStep(dir*5);else mtKnob(o.id,dir);}
         return;
       }
       if(k==='ArrowDown'||k==='ArrowRight')setMove(1);   // normal scroll = navigate (incl. past slider)
       else if(k==='ArrowUp'||k==='ArrowLeft')setMove(-1);
       else if(k==='Enter'){if(onSlider){sliderActive=true;o.classList.add('active');}else if(o)o.click();}
       else if(k==='Escape'||k==='Backspace')closeView('settings');
+      return;
+    }
+    if(v==='spotify'){
+      if(k==='ArrowRight')spCmd('next');
+      else if(k==='ArrowLeft')spCmd('prev');
+      else if(k==='ArrowDown')spVol(-5);
+      else if(k==='ArrowUp')spVol(5);
+      else if(k==='Enter')spCmd('playpause');
+      else if(k==='Escape'||k==='Backspace')closeView('spotify');
       return;
     }
     const body=document.querySelector('#'+v+' .vbody');
@@ -447,10 +565,10 @@ document.addEventListener('keydown',(ev)=>{
   else if(k==='Escape'||k==='Backspace')goLive();
 });
 // ---- Views (gallery / live / settings) ----
-function closeAllOverlays(){closeFacts();['gallery','live','settings','analytics','wifi'].forEach(id=>document.getElementById(id).classList.remove('show'));}
+function closeAllOverlays(){closeFacts();['gallery','live','settings','analytics','wifi','spotify','clockview','yearview'].forEach(id=>document.getElementById(id).classList.remove('show'));}
 function openView(id){closeAllOverlays();document.getElementById(id).classList.add('show');}
 function closeView(id){document.getElementById(id).classList.remove('show');}
-function curOverlay(){if(factsOpen)return'facts';return ['gallery','live','settings','analytics','wifi'].find(id=>document.getElementById(id).classList.contains('show'));}
+function curOverlay(){if(factsOpen)return'facts';return ['gallery','live','settings','analytics','wifi','spotify','clockview','yearview'].find(id=>document.getElementById(id).classList.contains('show'));}
 async function openGallery(){openView('gallery');
   const b=document.getElementById('galBody');b.innerHTML='Loading…';
   try{
@@ -514,22 +632,52 @@ async function wifiConnect(){const cur=document.getElementById('wifiCur');cur.te
   }catch(e){cur.textContent='Connection error';}}
 // Bird region / geographic ID filter
 function setLoc(lat,lon,place){const n=document.getElementById('locNote');n.textContent='Setting region to '+place+'…';
-  fetch('/api/birdloc?lat='+lat+'&lon='+lon+'&place='+encodeURIComponent(place)).then(r=>r.json()).then(d=>{n.textContent=d.ok?('Region: '+place):'Failed to set region';}).catch(()=>{n.textContent='Error';});}
+  fetch('/api/birdloc?lat='+lat+'&lon='+lon+'&place='+encodeURIComponent(place)).then(r=>r.json()).then(d=>{if(!d.ok)n.textContent='Failed to set region';markGeo();}).catch(()=>{n.textContent='Error';});}
+// Persistent region/filter highlight + summary, driven by the SERVER state (birdnet.conf), so it
+// survives reloads and never lies about what the analyzer is actually using.
+async function markGeo(){let st;try{st=await (await fetch('/api/birdstatus',{cache:'no-store'})).json();}catch(e){return;}
+  const regs=[...document.querySelectorAll('[data-reg]')];
+  regs.forEach(b=>b.classList.toggle('on',b.dataset.reg===st.place));
+  const au=document.getElementById('regAuto');
+  if(au)au.classList.toggle('on',!!st.place&&!regs.some(b=>b.classList.contains('on')));
+  document.querySelectorAll('[data-sf]').forEach(b=>b.classList.toggle('on',st.sf!=null&&Math.abs(parseFloat(b.dataset.sf)-st.sf)<0.005));
+  const n=document.getElementById('locNote');
+  if(n&&st.lat!=null){const f=st.sf==null?'—':(st.sf===0?'Off (catch‑all)':(st.sf>=0.05?'Strict':'Loose'));
+    n.textContent='Region: '+(st.place||'Custom')+' ('+st.lat.toFixed(2)+', '+st.lon.toFixed(2)+') · Geo filter: '+f+(st.sf!=null?' ('+st.sf+')':'');}}
 function detectLoc(){const n=document.getElementById('locNote');if(n)n.textContent='Detecting location…';
   fetch('/api/geoip').then(r=>r.json()).then(g=>{if(g.lat==null){if(n)n.textContent='Could not detect location';return;}
-    fetch('/api/birdloc?lat='+g.lat+'&lon='+g.lon+'&place='+encodeURIComponent(g.place)).then(r=>r.json()).then(d=>{if(n)n.textContent=d.ok?('Region: '+g.place):'Failed';});
+    fetch('/api/birdloc?lat='+g.lat+'&lon='+g.lon+'&place='+encodeURIComponent(g.place)).then(r=>r.json()).then(d=>{if(n&&!d.ok)n.textContent='Failed';markGeo();});
   }).catch(()=>{if(n)n.textContent='Error';});}
-function setSf(t){const n=document.getElementById('locNote');const lbl=t==0?'Off (catch‑all)':(t<0.02?'Loose':'Strict');
-  fetch('/api/sf?t='+t).then(r=>r.json()).then(d=>{n.textContent='Geo filter: '+lbl+' — restarting analysis…';}).catch(()=>{n.textContent='Error';});}
+function setSf(t){const n=document.getElementById('locNote');const lbl=t==0?'Off (catch‑all)':(t<0.05?'Loose':'Strict');
+  n.textContent='Geo filter: '+lbl+' — restarting analysis…';
+  fetch('/api/sf?t='+t).then(r=>r.json()).then(d=>{markGeo();}).catch(()=>{n.textContent='Error';});}
 async function openAnalytics(){openView('analytics');
   const b=document.getElementById('anBody');b.innerHTML='Loading…';
   try{
     const a=await (await fetch('/api/analytics',{cache:'no-store'})).json();
-    if(!a.detections){b.innerHTML='<div class="about">No detections yet today.</div>';return;}
-    const mx=Math.max(1,...a.hourly);
-    const bars=a.hourly.map((v,h)=>`<div class="bar${v===mx&&v?' peak':''}" style="height:${v/mx*100}%" title="${h}:00 — ${v}"></div>`).join('');
-    const tops=a.top.map(t=>`<div class="item"><img class="th" src="${IMG(t[0])}" onerror="this.style.visibility='hidden'"><div class="info"><div class="nm">${t[0]}</div></div><div class="cf">${t[1]} · ${Math.round(t[2]*100)}%</div></div>`).join('');
-    b.innerHTML=`
+    const days=a.days||[];
+    if(!days.length){b.innerHTML='<div class="about">No detections yet today.</div>';return;}
+    // Anchor "Today"/"Yesterday" to the newest day the server returned, NOT the device clock
+    // (the Car Thing has no RTC/NTP, so new Date() is unreliable and mislabels the days).
+    const anchor=days[0].date;
+    // Today first, then each previous day stacked below — scroll down through the history.
+    b.innerHTML=days.map((d,i)=>dayReport(d,i,anchor)).join('');
+  }catch(e){b.innerHTML='<div class="about">Could not load analytics.</div>';}
+}
+function anDayLabel(d,anchor){
+  if(d.date===anchor)return 'Today';
+  const diff=Math.round((new Date(anchor+'T00:00')-new Date(d.date+'T00:00'))/864e5);
+  if(diff===1)return 'Yesterday';
+  return new Date(d.date+'T00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'});
+}
+function dayReport(a,i,anchor){
+  const mx=Math.max(1,...a.hourly);
+  const bars=a.hourly.map((v,h)=>`<div class="bar${v===mx&&v?' peak':''}" style="height:${v/mx*100}%" title="${h}:00 — ${v}"></div>`).join('');
+  const tops=a.top.map(t=>`<div class="item"><img class="th" src="${IMG(t[0])}" onerror="this.style.visibility='hidden'"><div class="info"><div class="nm">${t[0]}</div></div><div class="cf">${t[1]} · ${Math.round(t[2]*100)}%</div></div>`).join('');
+  const sep=i?'margin-top:28px;padding-top:22px;border-top:1px solid var(--hair)':'';
+  return `
+    <div class="daybox" style="${sep}">
+      <div class="dlabel" style="font-size:19px;color:var(--fg);text-transform:none;letter-spacing:-.01em;margin:0 4px 12px">${anDayLabel(a,anchor)}</div>
       <div class="stats" style="margin-bottom:12px">
         <div class="stat"><div class="n">${a.detections}</div><div class="l">Detections</div></div>
         <div class="stat"><div class="n">${a.species}</div><div class="l">Species</div></div>
@@ -538,8 +686,7 @@ async function openAnalytics(){openView('analytics');
       <div class="about" style="padding:0 4px 10px">Mean confidence ${Math.round(a.conf_mean*100)}% · borderline (possible false IDs) <b>${a.bord_pct}%</b> · best hour ~${a.peak}:00</div>
       <div class="chart" style="width:100%">${bars}</div>
       <div class="xax" style="width:100%"><span>0</span><span>6</span><span>12</span><span>18</span></div>
-      <div class="dlabel" style="margin:16px 4px 8px">Top species today</div>${tops}`;
-  }catch(e){b.innerHTML='<div class="about">Could not load analytics.</div>';}
+      <div class="dlabel" style="margin:16px 4px 8px">Top species</div>${tops}`;
 }
 let specEnergy=0, specRAF=0, lastLiveKey='';
 function specLoop(){
@@ -575,7 +722,7 @@ function setHi(){const o=setOpts();o.forEach((b,i)=>b.classList.toggle('khi',i==
 function setMove(d){const o=setOpts();if(!o.length)return;
   sliderActive=false;document.querySelectorAll('#settings .slider.active').forEach(s=>s.classList.remove('active'));
   setSel=(setSel+d+o.length)%o.length;setHi();}
-async function openSettings(){openView('settings');markSettings();applyBright();markBrightAuto();renderStats();
+async function openSettings(){openView('settings');markSettings();applyBright();markBrightAuto();renderStats();markGeo();mtLoad();
   document.getElementById('about').innerHTML=
     `BirdThing · version <b>${VERSION}</b><br>Listens for birds with a Spotify Car Thing &amp; BirdNET.<br>Created by <b>Naga</b>.`;
   setSel=0;sliderActive=false;setTimeout(setHi,60);
@@ -603,11 +750,39 @@ function applyBright(){brightPct=Math.max(10,Math.min(100,brightPct));   // floo
 function manualBright(v){brightAuto=false;localStorage.setItem('brightAuto','0');markBrightAuto();brightPct=v;applyBright();}
 function brightStep(d){manualBright(brightPct+d);}
 function brightTap(e){const r=document.getElementById('bbar').getBoundingClientRect();manualBright(Math.round((e.clientX-r.left)/r.width*100));}
-// time-based auto (the ambient sensor is dead on this hardware): bright by day, dim at night
-function autoLevel(h){if(h>=8&&h<19)return 100;if(h>=6&&h<8)return 75;if(h>=19&&h<22)return 55;return 20;}
+// SOLAR auto-brightness. The Car Thing's ambient light sensor (TMD2772) is dead at the silicon
+// level (every ADC channel reads 0 over i2c even at 120x gain / 700ms integration), so we cannot
+// sense light directly. Instead compute the sun's elevation from the device lat/lon + the synced
+// Pi clock and ramp the backlight smoothly across REAL dawn/dusk (tracks the seasons, unlike the
+// old fixed hour buckets which dimmed at 8pm while the summer sun was still up).
+function solarElevationDeg(lat,lon,utcMs){
+  const R=Math.PI/180,D=180/Math.PI;
+  const n=utcMs/86400000+2440587.5-2451545.0;            // days since J2000.0
+  const L=(280.460+0.9856474*n)%360;                     // mean longitude (deg)
+  const g=((357.528+0.9856003*n)%360)*R;                 // mean anomaly (rad)
+  const lam=(L+1.915*Math.sin(g)+0.020*Math.sin(2*g))*R; // ecliptic longitude (rad)
+  const eps=(23.439-0.0000004*n)*R;                      // obliquity (rad)
+  const decl=Math.asin(Math.sin(eps)*Math.sin(lam));     // declination
+  const gmst=(280.46061837+360.98564736629*n)%360;       // Greenwich mean sidereal time (deg)
+  let ra=Math.atan2(Math.cos(eps)*Math.sin(lam),Math.cos(lam))*D;ra=(ra+360)%360;
+  const H=(((gmst+lon)%360)-ra)*R;                       // hour angle (rad)
+  const phi=lat*R;
+  return Math.asin(Math.sin(phi)*Math.sin(decl)+Math.cos(phi)*Math.cos(decl)*Math.cos(H))*D;
+}
+function autoLevelHour(h){if(h>=8&&h<19)return 100;if(h>=6&&h<8)return 75;if(h>=19&&h<21)return 45;return 10;}
+function autoLevel(){
+  const utc=(srvOffMs!=null?Date.now()+srvOffMs:Date.now());
+  if(luLat==null) return autoLevelHour(new Date(utc+tzOffMin*60000).getUTCHours());  // fallback until weather loads
+  const e=solarElevationDeg(luLat,luLon,utc);
+  let pct;
+  if(e>=AB_HI) pct=AB_DAY;
+  else if(e<=AB_LO) pct=AB_NIGHT;
+  else{const t=(e-AB_LO)/(AB_HI-AB_LO);pct=AB_NIGHT+(AB_DAY-AB_NIGHT)*(0.5-0.5*Math.cos(Math.PI*t));}  // smooth S-ramp through twilight
+  if(luCloud!=null&&e>0) pct*=(1-0.18*luCloud/100);      // gentle daytime dimming under overcast
+  return Math.max(AB_NIGHT,Math.min(100,Math.round(pct)));
+}
 function autoApply(force){if(!brightAuto)return;
-  const base=(srvOffMs!=null?Date.now()+srvOffMs:Date.now())+tzOffMin*60000;
-  const lvl=autoLevel(new Date(base).getUTCHours());
+  const lvl=autoLevel();
   if(force||lvl!==_lastAutoLvl){_lastAutoLvl=lvl;brightPct=lvl;applyBright();}}
 function setAuto(on){brightAuto=on;localStorage.setItem('brightAuto',on?'1':'0');markBrightAuto();if(on)autoApply(true);}
 function markBrightAuto(){const b=document.getElementById('bAuto');if(b)b.classList.toggle('on',brightAuto);}
@@ -622,12 +797,68 @@ function markSettings(){
 // stat cards tappable
 document.querySelectorAll('.stat').forEach(s=>s.onclick=openGallery);
 
+// ---- Spotify (now playing + transport; backed by spotifyd + MPRIS on the Pi via /api/spotify*) ----
+let spState={};
+function fmtT(ms){if(!ms||ms<0)ms=0;const s=Math.floor(ms/1000);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
+function spOpen(){return document.getElementById('spotify').classList.contains('show');}
+function openSpotify(){openView('spotify');renderSpotify(spState);}
+function renderNp(s){const np=document.getElementById('np');
+  if(s&&s.title){document.getElementById('npText').textContent=s.title+(s.artist?' — '+s.artist:'');np.style.display='flex';}
+  else np.style.display='none';}
+function renderSpotify(s){
+  s=s||{};
+  document.getElementById('spArt').style.backgroundImage=s.art?`url('${s.art}')`:'none';
+  document.getElementById('spTitle').textContent=s.title||(s.available?'Nothing playing':'Spotify not connected');
+  document.getElementById('spArtist').textContent=s.artist||'';
+  const dur=s.dur_ms||0,pos=s.pos_ms||0;
+  document.getElementById('spFill').style.width=(dur?Math.min(100,pos/dur*100):0)+'%';
+  document.getElementById('spPos').textContent=fmtT(pos);
+  document.getElementById('spDur').textContent=fmtT(dur);
+  document.getElementById('spPlay').textContent=s.playing?'⏸':'▶';
+  const vf=document.getElementById('spVolFill');if(vf)vf.style.width=(s.volume==null?50:s.volume)+'%';
+  const hint=document.getElementById('spHint');
+  if(hint)hint.textContent=s.available?'':'Open Spotify on your phone and pick this device to play.';
+}
+function spCmd(c){fetch('/api/spotify/cmd?c='+c).then(()=>setTimeout(pollSpotify,200)).catch(()=>{});}
+function spVol(d){const v=Math.max(0,Math.min(100,(spState&&spState.volume!=null?spState.volume:50)+d));
+  if(spState)spState.volume=v;const vf=document.getElementById('spVolFill');if(vf)vf.style.width=v+'%';
+  fetch('/api/spotify/vol?v='+v).then(()=>setTimeout(pollSpotify,300)).catch(()=>{});}
+async function pollSpotify(){
+  try{const s=await (await fetch('/api/spotify',{cache:'no-store'})).json();spState=s;renderNp(s);if(spOpen())renderSpotify(s);}
+  catch(e){renderNp(null);if(spOpen())renderSpotify({available:false});}
+}
+pollSpotify();setInterval(pollSpotify,1000);
+
 // Weather
 let unit='C',query='';
+// is it night at the Pi's location? (uses the synced Pi clock, same as the top-bar clock)
+function isNightNow(){const base=(srvOffMs!=null?Date.now()+srvOffMs:Date.now())+tzOffMin*60000;
+  const h=new Date(base).getUTCHours();return h<6||h>=20;}
+// colored inline SVG weather icons (the kiosk Chromium has no color-emoji font, so emoji render gray)
+function wxSvg(desc,night){
+  const d=(desc||'').toLowerCase();
+  const SUN='<circle cx="12" cy="12" r="5.2" fill="#ffd60a"/><g stroke="#ffd60a" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="3.6"/><line x1="12" y1="20.4" x2="12" y2="23"/><line x1="1" y1="12" x2="3.6" y2="12"/><line x1="20.4" y1="12" x2="23" y2="12"/><line x1="4.2" y1="4.2" x2="6" y2="6"/><line x1="18" y1="18" x2="19.8" y2="19.8"/><line x1="19.8" y1="4.2" x2="18" y2="6"/><line x1="6" y1="18" x2="4.2" y2="19.8"/></g>';
+  const STAR='<path fill="#fff" d="M12 2.2l2.6 5.8 6.3.6-4.8 4.2 1.4 6.2L12 15.9l-5.5 3.1 1.4-6.2L3.1 8.6l6.3-.6z"/>';
+  const cloud=c=>'<path fill="'+c+'" d="M7.5 19h9.6a4.2 4.2 0 0 0 .4-8.4 6.2 6.2 0 0 0-11.9-1.1A3.8 3.8 0 0 0 7.5 19z"/>';
+  const GRAY='#c7c7cc',DK='#aeaeb2';let s;
+  if(d.includes('thunder')) s=cloud(DK)+'<path fill="#ffd60a" d="M12 15l-3.3 4.6h2.2l-1.2 3.6 4.2-5.4h-2.1z"/>';
+  else if(d.includes('snow')||d.includes('grains')) s=cloud(GRAY)+'<g fill="#fff"><circle cx="8.5" cy="21.6" r="1.25"/><circle cx="12" cy="22.3" r="1.25"/><circle cx="15.5" cy="21.6" r="1.25"/></g>';
+  else if(d.includes('rain')||d.includes('drizzle')||d.includes('shower')) s=cloud(GRAY)+'<g stroke="#5ac8fa" stroke-width="2" stroke-linecap="round"><line x1="8.5" y1="20.4" x2="7.5" y2="23.2"/><line x1="12" y1="20.4" x2="11" y2="23.2"/><line x1="15.5" y1="20.4" x2="14.5" y2="23.2"/></g>';
+  else if(d.includes('fog')||d.includes('rime')) s=cloud(GRAY)+'<g stroke="#8e8e93" stroke-width="1.8" stroke-linecap="round"><line x1="6" y1="21.5" x2="15" y2="21.5"/><line x1="9" y1="23.6" x2="18" y2="23.6"/></g>';
+  else if(d.includes('overcast')) s=cloud(DK);
+  else if(d.includes('partly')||d.includes('mainly')) s='<g transform="translate(7.5,-3.5) scale(0.5)">'+(night?STAR:SUN)+'</g>'+cloud(night?'#d1d1d6':'#e8e8ed');
+  else if(d.includes('clear')) s=night?STAR:SUN;
+  else s=cloud(GRAY);
+  return '<svg viewBox="0 0 24 24" aria-hidden="true">'+s+'</svg>';
+}
 async function fetchWeather(){
   try{const w=await (await fetch('/api/weather',{cache:'no-store'})).json();
-    unit=w.unit||'C';document.getElementById('wxIcon').textContent=w.icon||'🌡️';
-    document.getElementById('wxTemp').textContent=(w.temp==null?'--':w.temp)+'°'+unit;}catch(e){}
+    unit=w.unit||'C';document.getElementById('wxIcon').innerHTML=wxSvg(w.desc,isNightNow());
+    document.getElementById('wxTemp').textContent=(w.temp==null?'--':w.temp)+'°'+unit;
+    if(typeof w.lat==='number'){luLat=w.lat;luLon=w.lon;}
+    if(typeof w.cloud==='number')luCloud=w.cloud;
+    if(brightAuto)autoApply(true);}
+  catch(e){document.getElementById('wxIcon').innerHTML=wxSvg('',false);}
 }
 fetchWeather();setInterval(fetchWeather,300000);
 function markUnit(){document.getElementById('unitC').classList.toggle('on',unit==='C');
@@ -656,6 +887,119 @@ async function doSearch(){if(!query.trim())return;
       d.onclick=async()=>{await fetch('/api/weather/loc?lat='+r.lat+'&lon='+r.lon+'&place='+encodeURIComponent(r.place));
         await fetchWeather();closeWx();};box.appendChild(d);});
   }catch(e){box.innerHTML='<div class="res">Search failed</div>';}}
+
+// ---- Clock + calendars (tap the time -> analog clock + month; tap the date -> year) ----
+function nowD(){const base=(srvOffMs!=null?Date.now()+srvOffMs:Date.now())+tzOffMin*60000;return new Date(base);}
+// Scale a view's content to exactly fit its container so the clock/calendar stay fully on-screen
+// at every text size (and the year calendar scales UP to fill the screen).
+function fitInto(el,maxS){
+  el.style.transform='';el.style.transformOrigin='center center';
+  const p=el.parentElement;
+  const s=Math.min(maxS||1,(p.clientWidth-8)/el.scrollWidth,(p.clientHeight-8)/el.scrollHeight);
+  if(s>0&&isFinite(s))el.style.transform='scale('+s+')';
+}
+function openClock(){openView('clockview');buildTicks();renderMonthCal();updClock();
+  setTimeout(()=>fitInto(document.getElementById('clockWrap'),1.12),30);}
+function openYear(){openView('yearview');renderYear();
+  setTimeout(()=>fitInto(document.getElementById('yearGrid'),2.6),30);}
+function buildTicks(){const g=document.getElementById('anaTicks');if(g.childElementCount)return;let h='';
+  for(let i=0;i<60;i++){const a=i*6*Math.PI/180,r1=i%5?90:83;
+    const x1=100+Math.sin(a)*r1,y1=100-Math.cos(a)*r1,x2=100+Math.sin(a)*94,y2=100-Math.cos(a)*94;
+    h+=`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${i%5?'var(--hair)':'var(--sec)'}" stroke-width="${i%5?1:3}"/>`;}
+  g.innerHTML=h;}
+function updClock(){
+  if(!document.getElementById('clockview').classList.contains('show'))return;
+  const d=nowD(),h=d.getUTCHours(),m=d.getUTCMinutes(),s=d.getUTCSeconds();
+  const rot=(id,deg)=>{const e=document.getElementById(id);if(e)e.setAttribute('transform','rotate('+deg+' 100 100)');};
+  rot('anaH',(h%12)*30+m*.5);rot('anaM',m*6+s*.1);rot('anaS',s*6);
+  document.getElementById('digTime').textContent=((h%12)||12)+':'+String(m).padStart(2,'0')+' '+(h<12?'AM':'PM');
+  document.getElementById('digDate').textContent=DAYS[d.getUTCDay()]+', '+MON[d.getUTCMonth()]+' '+d.getUTCDate()+', '+d.getUTCFullYear();}
+function monthHTML(y,mo,hl,big){  // hl = day-of-month to highlight, -1 for none
+  const first=new Date(Date.UTC(y,mo,1)).getUTCDay(),days=new Date(Date.UTC(y,mo+1,0)).getUTCDate();
+  const cs=big?'30px':'15px',fs=big?'15px':'9.5px',hf=big?'17px':'11px';
+  let h=`<div style="font-weight:700;font-size:${hf};margin-bottom:3px;color:var(--green)">${MON[mo]}${big?' '+y:''}</div>`;
+  h+=`<div style="display:grid;grid-template-columns:repeat(7,${cs});font-size:${fs};line-height:${cs};text-align:center;color:var(--sec)">`+
+     ['S','M','T','W','T','F','S'].map(x=>'<div>'+x+'</div>').join('')+'</div>';
+  h+=`<div style="display:grid;grid-template-columns:repeat(7,${cs});font-size:${fs};line-height:${cs};text-align:center;">`;
+  for(let i=0;i<first;i++)h+='<div></div>';
+  for(let dd=1;dd<=days;dd++)h+=(dd===hl)
+    ?`<div style="background:var(--green);color:#000;border-radius:50%;font-weight:700">${dd}</div>`
+    :`<div>${dd}</div>`;
+  return h+'</div>';}
+function renderMonthCal(){const d=nowD();
+  document.getElementById('monthCal').innerHTML=monthHTML(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),true);}
+function renderYear(){const d=nowD(),y=d.getUTCFullYear();
+  document.getElementById('yearTitle').textContent=y;
+  document.getElementById('yearBody').innerHTML='<div id="yearGrid" style="display:grid;grid-template-columns:repeat(4,auto);gap:8px 18px;">'+
+    [...Array(12)].map((_,m)=>'<div>'+monthHTML(y,m,m===d.getUTCMonth()?d.getUTCDate():-1,false)+'</div>').join('')+'</div>';}
+
+// ---- Microphone & bird ID tuning (Settings sliders -> /api/mictune/set) ----
+// gain=MAX_GAIN & gate=NOISE_FLOOR on the Car Thing mic node, hp=receiver high-pass, conf=BirdNET CONFIDENCE.
+const MT={gain:{min:20,max:300},gate:{min:0,max:200},conf:{min:0.5,max:0.95}};
+let mtVals={gain:120,gate:25,hp:1,conf:0.8},mtT=null;
+function mtBar(id,key,fmt){
+  const bar=document.getElementById(id),fill=document.getElementById(id+'F'),
+        lbl=document.getElementById(id+'V'),o=MT[key];
+  function set(v,apply){v=Math.max(o.min,Math.min(o.max,v));mtVals[key]=v;
+    fill.style.width=(100*(v-o.min)/(o.max-o.min))+'%';lbl.textContent='— '+fmt(v);
+    if(apply)mtQueue();}
+  function fromE(e){const r=bar.getBoundingClientRect();
+    set(o.min+((e.clientX-r.left)/r.width)*(o.max-o.min),false);}
+  let d=false;
+  bar.addEventListener('pointerdown',e=>{d=true;bar.classList.add('active');try{bar.setPointerCapture(e.pointerId);}catch(_){ }fromE(e);});
+  bar.addEventListener('pointermove',e=>{if(d)fromE(e);});
+  ['pointerup','pointercancel'].forEach(ev=>bar.addEventListener(ev,()=>{if(d){d=false;bar.classList.remove('active');mtQueue();}}));
+  return set;}
+const mtSetters={gain:mtBar('mtGain','gain',v=>Math.round(v)+'× max boost'),
+  gate:mtBar('mtGate','gate',v=>Math.round(v)+(v<15?' (off — hears everything)':v<70?' (normal)':' (strong)')),
+  conf:mtBar('mtConf','conf',v=>Math.round(v*100)+'% sure'+(v<0.65?' (catch-all)':v<0.85?' (balanced)':' (strict)'))};
+// knob step per mic slider (id -> [mtVals key, step per detent]); adjusts + applies (debounced)
+const MTSTEP={mtGain:['gain',10],mtGate:['gate',10],mtConf:['conf',0.02]};
+function mtKnob(id,dir){const s=MTSTEP[id];if(!s)return;mtSetters[s[0]](mtVals[s[0]]+dir*s[1],true);}
+function mtHp(v){mtVals.hp=v;markMt();mtQueue();}
+function markMt(){document.querySelectorAll('[data-hp]').forEach(b=>b.classList.toggle('on',+b.dataset.hp===mtVals.hp));
+  const e=document.getElementById('mtHpV');if(e)e.textContent=mtVals.hp?'— On (cuts below 250 Hz)':'— Off (raw audio)';}
+function mtQueue(){clearTimeout(mtT);
+  const st=document.getElementById('mtStatus');st.textContent='Applying… (restarts the analyzer, ~5 s)';
+  mtT=setTimeout(async()=>{try{
+    const r=await (await fetch('/api/mictune/set?gain='+Math.round(mtVals.gain)+'&gate='+Math.round(mtVals.gate)+'&hp='+mtVals.hp+'&conf='+mtVals.conf.toFixed(2))).json();
+    const a=r.applied||{};
+    st.textContent='Applied ✓  ·  Car Thing mic '+(a.mic?'✓':'unreachable — will pick it up when it reconnects');
+  }catch(e){st.textContent='Apply failed — try again';}},800);}
+async function mtLoad(){try{const c=await (await fetch('/api/mictune')).json();
+  mtVals={gain:c.gain,gate:c.gate,hp:c.hp,conf:c.conf};
+  mtSetters.gain(c.gain,false);mtSetters.gate(c.gate,false);mtSetters.conf(c.conf,false);markMt();
+  document.getElementById('mtStatus').textContent='';}catch(e){}}
+
+// ---- Universal drag-scroll + pull-to-refresh. The Car Thing touchscreen presents as a mouse
+// (USB HID pointer), so native touch scrolling never kicks in — implement dragging with pointer
+// events. Swipe down from the top past the threshold to reload. ----
+(function(){
+  const ptr=document.createElement('div');ptr.id='ptr';ptr.textContent='↻ Release to refresh';
+  document.body.appendChild(ptr);
+  let down=false,sy=0,st=0,el=null,pull=0,moved=0;
+  function scrollableFrom(t){for(;t&&t!==document.body;t=t.parentElement){
+    const s=getComputedStyle(t);
+    if((s.overflowY==='auto'||s.overflowY==='scroll')&&t.scrollHeight>t.clientHeight+4)return t;}
+    return null;}
+  document.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse')return;
+    if(e.target.closest('.slider,#player'))return;  // brightness/mic bars + mini player self-drag
+    down=true;sy=e.clientY;moved=0;pull=0;el=scrollableFrom(e.target);st=el?el.scrollTop:0;
+    if(el)el.style.scrollBehavior='auto';},true);
+  document.addEventListener('pointermove',e=>{if(!down)return;
+    const dy=e.clientY-sy;moved=Math.max(moved,Math.abs(dy),Math.abs(e.movementX||0));
+    if(el){el.scrollTop=st-dy;}
+    else if(dy>0&&!curOverlay()&&!factsOpen){pull=dy;
+      ptr.style.opacity=Math.min(1,dy/130);ptr.style.transform='translate(-50%,'+Math.min(56,dy/2.4)+'px)';}
+  },true);
+  function end(){if(pull>130)location.reload();
+    if(el)el.style.scrollBehavior='';
+    down=false;el=null;pull=0;ptr.style.opacity=0;ptr.style.transform='translate(-50%,0)';}
+  document.addEventListener('pointerup',end,true);
+  document.addEventListener('pointercancel',end,true);
+  // a drag that scrolled shouldn't also fire the click underneath it
+  document.addEventListener('click',e=>{if(moved>14){e.stopPropagation();e.preventDefault();moved=0;}},true);
+})();
 </script>
 </body>
 </html>

@@ -12,13 +12,18 @@ Built by **Naga**.
 
 ### More views & features
 
-| Settings — text sizes & brightness | Wi‑Fi picker (on‑screen keyboard) |
+| Tap the time — analog clock + calendar | Live mic & bird‑ID tuning (in Settings) |
 |---|---|
+| ![Clock & calendar](docs/screenshots/clock-calendar.png) | ![Mic tuning](docs/screenshots/mic-tuning.png) |
+| **Settings** — text sizes & brightness | **Wi‑Fi picker** (on‑screen keyboard) |
 | ![Settings](docs/screenshots/settings.png) | ![Wi‑Fi](docs/screenshots/wifi-keyboard.png) |
 | **Analytics** — today's volume & confidence | **Accessibility** — XL text |
 | ![Analytics](docs/screenshots/analytics.png) | ![XL text](docs/screenshots/accessibility-xl.png) |
 
-Features: Small→XXL text sizes, auto/low/mid/high brightness, on‑screen **Wi‑Fi** switcher,
+Features: **swipe‑down‑to‑refresh**, **tap the time** for a full‑screen analog clock + month
+calendar (tap the date for a year view), **live mic & ID tuning** in Settings (mic sensitivity,
+noise gate, rumble filter, ID strictness — applied to the Car Thing mic, receiver and BirdNET on
+the fly), Small→XXL text sizes, 0–100% + time‑based‑auto brightness, on‑screen **Wi‑Fi** switcher,
 **bird‑region** + geo‑filter (precision↔catch‑all) with IP auto‑location, tap‑to‑open Wikipedia
 facts with a ▶ play‑call (Xeno‑canto), nightly analytics, and a self‑healing mic.
 
@@ -49,8 +54,12 @@ Car Thing PDM mic ──(capture+gain, Python/ALSA)──► TCP ──► Raspb
 Tuned for fast, precise IDs (BirdNET is from the same Cornell lab behind Merlin):
 
 - **Low latency** — 3‑second analysis windows + a 1‑second dashboard refresh → IDs in ~3–4 s.
-- **Noise reduction** — the Pi receiver applies a gentle bandpass (350 Hz–12 kHz) to cut wind,
-  traffic and AC hum that mask distant birds; optional spectral noise‑gating is built in.
+- **Noise reduction** — the Pi receiver applies a gentle 250 Hz high‑pass to cut sub‑bass rumble
+  (wind, traffic, AC hum) that masks distant birds, without touching bird frequencies (~300 Hz+).
+  It's toggleable live from the dashboard's **Rumble filter** switch.
+- **Live tuning** — Settings exposes the whole chain: **mic sensitivity** (Car‑Thing auto‑gain
+  ceiling) and **noise gate** on the mic node, the **rumble filter** on the receiver, and **ID
+  strictness** (BirdNET confidence) — each applied on the fly with plain‑language labels.
 - **Precision** — location/season filtering + a tuned confidence threshold cut false IDs without
   dropping real detections.
 - **Accessibility** — Small→XXL text scaling (enlarges every label), knob‑navigable settings,
