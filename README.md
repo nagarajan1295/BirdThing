@@ -8,7 +8,7 @@ counts, and activity graphs.
 
 Built by **Naga**.
 
-![BirdThing dashboard](docs/dashboard.png)
+![BirdThing dashboard](docs/screenshots/accessibility-xl.png)
 
 ### More views & features
 
@@ -18,7 +18,7 @@ Built by **Naga**.
 | **Settings** — text sizes & brightness | **Wi‑Fi picker** (on‑screen keyboard) |
 | ![Settings](docs/screenshots/settings.png) | ![Wi‑Fi](docs/screenshots/wifi-keyboard.png) |
 | **Analytics** — today's volume & confidence | **Accessibility** — XL text |
-| ![Analytics](docs/screenshots/analytics.png) | ![XL text](docs/screenshots/accessibility-xl.png) |
+| ![Analytics](docs/screenshots/analytics.png) | ![XL text](docs/dashboard.png) |
 
 Features: **swipe‑down‑to‑refresh**, **tap the time** for a full‑screen analog clock + month
 calendar (tap the date for a year view), **live mic & ID tuning** in Settings (mic sensitivity,
