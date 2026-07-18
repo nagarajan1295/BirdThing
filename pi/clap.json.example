@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "ha_url": "http://192.168.1.29:8123",
+  "ha_token": "PASTE_LONG_LIVED_ACCESS_TOKEN_HERE",
+  "entity": "light.living_room",
+  "_comment": "Copy to /opt/birdthing/clap.json (NEVER commit the real token). entity can be light.* or switch.*; a double clap calls <domain>.toggle. Optional tuning overrides:",
+  "tune": {
+    "peak_abs": 18000,
+    "ratio": 5.0,
+    "dbl_min": 0.10,
+    "dbl_max": 0.60,
+    "cooldown": 1.20
+  }
+}

@@ -6,6 +6,12 @@
 # to plain passthrough so the pipeline can never break. Single writer to aplay.stdin (no deadlock).
 import socket, subprocess, time, os
 
+try:
+    import clapdetect            # double-clap -> Home Assistant light toggle
+except Exception as _e:          # never let the clap add-on break the pipeline
+    clapdetect = None
+    print("clapdetect unavailable:", _e, flush=True)
+
 PORT = 9000
 _lastlvl = 0.0   # throttle for writing the current loudness to /tmp/bt_level
 LOOPDEV = "hw:Loopback,0,0"
@@ -49,7 +55,21 @@ def _publish_level(data):
         pass
 
 
+def _feed_clap(data):
+    # tap the raw stream for the double-clap detector; must never raise
+    if clapdetect is None or not HAVE_NP:
+        return
+    try:
+        a = np.frombuffer(data[:len(data) // 4 * 4], dtype="<i2")
+        if a.size:
+            mono = a.reshape(-1, 2)[:, 0]  # one channel is enough for onset detection
+            clapdetect.feed(mono)
+    except Exception:
+        pass
+
+
 def process(data):
+    _feed_clap(data)
     if not OK:
         _publish_level(data)               # rumble filter off: still report loudness
         return data
