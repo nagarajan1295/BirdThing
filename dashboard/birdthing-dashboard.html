@@ -179,6 +179,9 @@
   .clsw .csid{color:var(--sec);font-weight:400;font-size:.82em;}
   .clmeter{height:26px;background:var(--card);border-radius:13px;overflow:hidden;box-shadow:inset 0 0 0 2px var(--hair);}
   .clmeter .bfill{transition:width .1s linear;}
+  /* embedded as the Home Assistant "Clap Lights" page (opened at /#clap): show only the
+     clap UI — hide the Car Thing nav remote and the Back button so it reads as its own page. */
+  body.embed-clap #hanav,body.embed-clap #clapview .vclose{display:none;}
   /* pull-to-refresh pill: swipe down from the top to reload */
   #ptr{position:fixed;top:6px;left:50%;transform:translate(-50%,0);background:var(--card);color:var(--fg);
     padding:10px 20px;border-radius:22px;opacity:0;z-index:99998;transition:opacity .15s;font-size:16px;
@@ -532,6 +535,10 @@ async function refresh(){
   }catch(e){}
 }
 refresh();setInterval(refresh,1000);
+// Deep-link: opening this page at /#clap jumps straight to the Clap control page.
+// The Home Assistant "Clap Lights" dashboard embeds .../#clap in an iframe.
+function clapDeepLink(){if((location.hash||'').toLowerCase().replace('#','')==='clap'){document.body.classList.add('embed-clap');try{openClap();}catch(_){}}}
+addEventListener('hashchange',clapDeepLink);setTimeout(clapDeepLink,250);
 function move(delta){
   if(!rows.length)return;
   follow=false;sel=Math.max(0,Math.min(rows.length-1,sel+delta));
