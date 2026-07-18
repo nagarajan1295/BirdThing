@@ -8,7 +8,7 @@
 #   Edit HA_HOST and IFRAME_URL below, then:  python3 ha_clap_dashboard.py
 import json, os, socket, base64, struct
 
-HA_HOST = "YOUR_HA_IP"          # e.g. 192.168.1.29  (the machine running Home Assistant)
+HA_HOST = "YOUR_HA_IP"          # the LAN IP of the machine running Home Assistant
 HA_PORT = 8123
 URL_PATH = "clap-lights"        # sidebar path (lowercase, must contain a hyphen)
 IFRAME_URL = "http://YOUR_BIRDTHING_PI_IP:8090/#clap"   # the BirdThing dashboard, deep-linked to the Clap page
