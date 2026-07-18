@@ -383,6 +383,9 @@
     <div class="about" style="padding:0 4px 8px">Clap twice to toggle the switches you pick below. It listens on the same mic as the birds — this <b>never</b> affects bird ID.</div>
     <div class="srow"><span class="sk">Clap detection</span>
       <div class="seg2"><button data-clen="1" onclick="clEnable(1)">On</button><button data-clen="0" onclick="clEnable(0)">Off</button></div></div>
+    <div class="srow"><span class="sk">Only after sunset</span>
+      <div class="seg2"><button data-clss="1" onclick="clSunset(1)">On</button><button data-clss="0" onclick="clSunset(0)">Off</button></div>
+      <span class="about" id="clSunNote" style="padding:4px 4px 0"></span></div>
     <div class="srow" style="gap:6px">
       <span class="sk">Live meter <span class="mtv" id="clLive"></span></span>
       <div class="clmeter" style="width:100%"><div class="bfill" id="clMeterPk" style="width:0"></div></div>
@@ -1034,7 +1037,7 @@ async function mtLoad(){try{const c=await (await fetch('/api/mictune')).json();
 
 // ---- Clap control (Settings -> Clap page -> /api/clap*). Toggles HA switches on a double
 // clap. Fully separate from BirdNET; sensitivity/boost tune the receiver's clapdetect. ----
-let clVals={enabled:true,sensitivity:6,boost:1,dbl_max:0.6,cooldown:1.2,entities:[]};
+let clVals={enabled:true,after_sunset:false,sensitivity:6,boost:1,dbl_max:0.6,cooldown:1.2,entities:[],_night:null,_dusk:null,_dawn:null};
 let clT=null,clPoll=null,clSwitches=[],clSetters={};
 const CLDEF={clSens:{key:'sensitivity',min:1,max:10,fmt:v=>Math.round(v)+' / 10'+(v<=3?' (strict)':v>=8?' (very sensitive)':'')},
   clBoost:{key:'boost',min:1,max:8,fmt:v=>v.toFixed(1)+'×'},
@@ -1051,13 +1054,23 @@ function clBar(id){const o=CLDEF[id],bar=document.getElementById(id),fill=docume
   return set;}
 function clQueue(){clearTimeout(clT);const st=document.getElementById('clStatus');st.textContent='Saving…';
   clT=setTimeout(async()=>{try{
-    const p=new URLSearchParams({enabled:clVals.enabled?1:0,sensitivity:Math.round(clVals.sensitivity),
-      boost:clVals.boost.toFixed(1),dbl_max:clVals.dbl_max.toFixed(2),cooldown:clVals.cooldown.toFixed(1),
+    const p=new URLSearchParams({enabled:clVals.enabled?1:0,after_sunset:clVals.after_sunset?1:0,
+      sensitivity:Math.round(clVals.sensitivity),boost:clVals.boost.toFixed(1),
+      dbl_max:clVals.dbl_max.toFixed(2),cooldown:clVals.cooldown.toFixed(1),
       entities:clVals.entities.join(',')});
     await fetch('/api/clap/set?'+p.toString());st.textContent='Saved ✓';
   }catch(e){st.textContent='Save failed — try again';}},500);}
 function clMark(){document.querySelectorAll('[data-clen]').forEach(b=>b.classList.toggle('on',+b.dataset.clen===(clVals.enabled?1:0)));}
 function clEnable(v){clVals.enabled=!!v;clMark();clQueue();}
+function clSunMark(){document.querySelectorAll('[data-clss]').forEach(b=>b.classList.toggle('on',+b.dataset.clss===(clVals.after_sunset?1:0)));}
+function clSunset(v){clVals.after_sunset=!!v;clSunMark();clSunNote();clQueue();}
+function clSunNote(){const e=document.getElementById('clSunNote');if(!e)return;
+  if(!clVals.after_sunset){e.textContent='Claps work any time of day.';return;}
+  const t=s=>{try{return new Date(s).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});}catch(_){return'';}};
+  if(clVals._night==null){e.textContent='Only active after sunset (uses your Home Assistant location).';return;}
+  e.textContent=clVals._night
+    ?('🌙 After sunset — clap toggling is active now'+(clVals._dawn?' (until sunrise ~'+t(clVals._dawn)+')':''))
+    :('☀️ Daytime — paused until sunset'+(clVals._dusk?' ~'+t(clVals._dusk):''));}
 function clRenderSwitches(){const box=document.getElementById('clSwitches');
   if(!clSwitches.length){box.innerHTML='<div class="about">No Home Assistant switches found — check the HA token.</div>';return;}
   box.innerHTML='';clSwitches.forEach(s=>{const on=clVals.entities.includes(s.id);
@@ -1079,17 +1092,19 @@ function clMeter(stat){if(!stat)return;const MAX=32767,pk=stat.peak||0;
 async function openClap(){openView('clapview');const st=document.getElementById('clStatus');st.textContent='';
   if(!clSetters.clSens){clSetters={clSens:clBar('clSens'),clBoost:clBar('clBoost'),clDbl:clBar('clDbl'),clCool:clBar('clCool')};}
   try{const c=await (await fetch('/api/clap')).json();
-    clVals.enabled=c.enabled;clVals.sensitivity=c.sensitivity;clVals.boost=c.boost;
+    clVals.enabled=c.enabled;clVals.after_sunset=c.after_sunset;clVals.sensitivity=c.sensitivity;clVals.boost=c.boost;
     clVals.dbl_max=c.dbl_max;clVals.cooldown=c.cooldown;clVals.entities=c.entities||[];clSwitches=c.switches||[];
+    clVals._night=c.sun_night;clVals._dusk=c.sun_dusk;clVals._dawn=c.sun_dawn;
     clSetters.clSens(c.sensitivity,false);clSetters.clBoost(c.boost,false);clSetters.clDbl(c.dbl_max,false);clSetters.clCool(c.cooldown,false);
-    clMark();clRenderSwitches();clMeter(c.stat);
+    clMark();clSunMark();clSunNote();clRenderSwitches();clMeter(c.stat);
     if(!c.has_token)st.textContent='⚠ No Home Assistant token configured.';
     else if(!c.switches.length)st.textContent='⚠ Could not reach Home Assistant to list switches.';
   }catch(e){st.textContent='Could not load clap settings.';}
   clearInterval(clPoll);
   clPoll=setInterval(async()=>{
     if(!document.getElementById('clapview').classList.contains('show')){clearInterval(clPoll);return;}
-    try{const c=await (await fetch('/api/clap')).json();clMeter(c.stat);}catch(_){}},700);}
+    try{const c=await (await fetch('/api/clap')).json();clMeter(c.stat);
+      clVals._night=c.sun_night;clVals._dusk=c.sun_dusk;clVals._dawn=c.sun_dawn;clSunNote();}catch(_){}},700);}
 
 // ---- Universal drag-scroll + pull-to-refresh. The Car Thing touchscreen presents as a mouse
 // (USB HID pointer), so native touch scrolling never kicks in — implement dragging with pointer

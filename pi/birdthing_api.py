@@ -675,18 +675,41 @@ def _ha_switches(c):
             pass
     return out
 
+_clap_sun = {"t": 0.0, "night": None, "dusk": None, "dawn": None}
+
+def _ha_sun(c):
+    # current sun state (below/above horizon) + next dusk/dawn from HA sun.sun; cached 60s
+    now = time.time()
+    if now - _clap_sun["t"] < 60 and _clap_sun["night"] is not None:
+        return _clap_sun
+    if c.get("ha_url") and c.get("ha_token"):
+        try:
+            req = urllib.request.Request(c["ha_url"].rstrip("/") + "/api/states/sun.sun",
+                                         headers={"Authorization": "Bearer " + c["ha_token"]})
+            s = json.load(urllib.request.urlopen(req, timeout=5))
+            a = s.get("attributes", {})
+            _clap_sun.update(t=now, night=(s.get("state") == "below_horizon"),
+                             dusk=a.get("next_dusk") or a.get("next_setting"),
+                             dawn=a.get("next_dawn") or a.get("next_rising"))
+        except Exception:
+            pass
+    return _clap_sun
+
 def clap_status():
     c = _clap_load()
     try:
         stat = json.load(open(CLAPSTAT))
     except Exception:
         stat = {}
+    sun = _ha_sun(c)
     return {"enabled": bool(c.get("enabled")),
             "entities": _clap_entities(c),
             "sensitivity": c.get("sensitivity", 6),
             "boost": c.get("boost", 1.0),
             "dbl_max": c.get("dbl_max", c.get("tune", {}).get("dbl_max", 0.6)),
             "cooldown": c.get("cooldown", c.get("tune", {}).get("cooldown", 1.2)),
+            "after_sunset": bool(c.get("after_sunset")),
+            "sun_night": sun.get("night"), "sun_dusk": sun.get("dusk"), "sun_dawn": sun.get("dawn"),
             "has_token": bool(c.get("ha_token")),
             "switches": _ha_switches(c), "stat": stat}
 
@@ -704,6 +727,7 @@ def clap_set(q):
     v = val("boost", float, 1.0, 8.0);    c["boost"] = round(v, 1) if v is not None else c.get("boost", 1.0)
     v = val("dbl_max", float, 0.3, 1.2);  c["dbl_max"] = v if v is not None else c.get("dbl_max", 0.6)
     v = val("cooldown", float, 0.3, 4.0); c["cooldown"] = v if v is not None else c.get("cooldown", 1.2)
+    v = val("after_sunset", int, 0, 1);   c["after_sunset"] = bool(v) if v is not None else c.get("after_sunset", False)
     if "entities" in q:
         c["entities"] = [e for e in q["entities"][0].split(",") if e and "." in e]
         c.pop("entity", None)
