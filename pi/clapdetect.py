@@ -18,7 +18,7 @@
 #
 # DEFENSIVE: every public entry point swallows its own errors. Nothing in here
 # may ever raise into birdthing_recv and break the pipeline.
-import json, os, time, threading, urllib.request
+import json, os, time, threading, urllib.request, datetime
 
 CFG_PATH  = os.environ.get("CLAP_CFG", "/opt/birdthing/clap.json")
 LOG_PATH  = os.environ.get("CLAP_LOG", "/tmp/bt_clap.log")
@@ -84,9 +84,9 @@ def _load_cfg():
         with open(CFG_PATH) as f:
             c = json.load(f)
         _cfg, _cfg_mtime = c, m
-        _log("config: entities=%s enabled=%s sens=%s boost=%s after_sunset=%s"
+        _log("config: entities=%s enabled=%s sens=%s boost=%s after_sunset=%s pre_min=%s"
              % (_entities(c), c.get("enabled"), c.get("sensitivity", 6),
-                c.get("boost", 1.0), c.get("after_sunset", False)))
+                c.get("boost", 1.0), c.get("after_sunset", False), c.get("pre_sunset_min", 0)))
         return c
     except Exception as e:
         _log("config error: %s" % e)
@@ -103,28 +103,47 @@ def _entities(c):
     return []
 
 
-_sun_night = None     # cached "is it after sunset" (HA sun.sun), refreshed on a TTL
-_sun_t = 0.0
+_sun = {"t": 0.0, "night": None, "set": None}   # cached HA sun.sun (state + next sunset)
 
-def _is_night(c):
-    # True if the sun is below the horizon per HA's sun.sun (which uses the home
-    # location HA is configured with). Cached 3 min. Fails OPEN (allow) if unknown,
-    # since the toggle itself needs HA anyway.
-    global _sun_night, _sun_t
+def _sun_state(c):
+    # HA sun.sun: is it currently below the horizon, and when is the next actual
+    # sunset (next_setting, the horizon crossing -- NOT next_dusk which is ~25 min
+    # later). Uses the location HA is configured with; cached 2 min.
     now = time.time()
-    if _sun_night is not None and now - _sun_t < 180:
-        return _sun_night
+    if _sun["night"] is not None and now - _sun["t"] < 120:
+        return _sun
     try:
         req = urllib.request.Request(
             c["ha_url"].rstrip("/") + "/api/states/sun.sun",
             headers={"Authorization": "Bearer " + c["ha_token"]})
-        st = json.load(urllib.request.urlopen(req, timeout=4)).get("state")
-        _sun_night = (st == "below_horizon")
-        _sun_t = now
-        return _sun_night
+        s = json.load(urllib.request.urlopen(req, timeout=4))
+        a = s.get("attributes", {})
+        _sun.update(t=now, night=(s.get("state") == "below_horizon"),
+                    set=a.get("next_setting"))
     except Exception as e:
         _log("sun.sun check failed (%s) -> allowing" % e)
-        return True if _sun_night is None else _sun_night
+        if _sun["night"] is None:            # never got a reading -> fail OPEN
+            return {"t": now, "night": True, "set": None}
+    return _sun
+
+def _sunset_allows(c):
+    # True if clap toggling is allowed under the sunset gate. Active window =
+    # [sunset - pre_sunset_min, sunrise]. At night -> active (until sunrise, when
+    # sun.sun flips to above_horizon). By day -> only within pre_sunset_min before
+    # the next sunset. Fails OPEN if the sun state is unknown.
+    s = _sun_state(c)
+    if s["night"]:
+        return True
+    pre = float(c.get("pre_sunset_min", 0) or 0)
+    if pre > 0 and s.get("set"):
+        try:
+            secs = (datetime.datetime.fromisoformat(s["set"])
+                    - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+            if 0 <= secs <= pre * 60:
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def _fire_toggle():
@@ -134,8 +153,8 @@ def _fire_toggle():
     if not c or not c.get("enabled") or not c.get("ha_token") or not ents:
         _log("double-clap (no HA config / disabled -> not toggling)")
         return
-    if c.get("after_sunset") and not _is_night(c):
-        _log("double-clap ignored — daytime (after-sunset only)")
+    if c.get("after_sunset") and not _sunset_allows(c):
+        _log("double-clap ignored — outside the after-sunset window")
         return
     for e in ents:
         domain = e.split(".")[0]
