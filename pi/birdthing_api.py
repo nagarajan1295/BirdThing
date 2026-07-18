@@ -624,6 +624,113 @@ def fetch_image(name):
             pass
     return None
 
+# ---- Clap control (double-clap -> Home Assistant toggle) ------------------------------------
+# Config lives in /opt/birdthing/clap.json (also read live by clapdetect.py in the receiver);
+# clapdetect publishes live tuning stats to /tmp/bt_clap_stat.json. These endpoints let the
+# dashboard's Clap page read status, adjust sensitivity/boost/entities, and test-toggle. This is
+# entirely separate from BirdNET — nothing here touches bird detection.
+CLAPCONF = "/opt/birdthing/clap.json"
+CLAPSTAT = "/tmp/bt_clap_stat.json"
+_clap_sw = {"t": 0.0, "list": []}
+
+def _clap_load():
+    try:
+        return json.load(open(CLAPCONF))
+    except Exception:
+        return {}
+
+def _clap_save(c):
+    try:
+        json.dump(c, open(CLAPCONF, "w"), indent=2)
+        os.chmod(CLAPCONF, 0o600)
+        return True
+    except Exception:
+        return False
+
+def _clap_entities(c):
+    e = c.get("entities")
+    if isinstance(e, list) and e:
+        return [x for x in e if x and "." in x]
+    return [c["entity"]] if c.get("entity") else []
+
+def _ha_switches(c):
+    # togglable HA entities (switch.* / light.*), cached ~20 s; _led indicators sorted last
+    now = time.time()
+    if now - _clap_sw["t"] < 20 and _clap_sw["list"]:
+        return _clap_sw["list"]
+    out = []
+    if c.get("ha_url") and c.get("ha_token"):
+        try:
+            req = urllib.request.Request(c["ha_url"].rstrip("/") + "/api/states",
+                                         headers={"Authorization": "Bearer " + c["ha_token"]})
+            for s in json.load(urllib.request.urlopen(req, timeout=6)):
+                eid = s["entity_id"]
+                if eid.split(".")[0] in ("switch", "light"):
+                    out.append({"id": eid,
+                                "name": s.get("attributes", {}).get("friendly_name", eid),
+                                "state": s.get("state"), "led": eid.endswith("_led")})
+            out.sort(key=lambda x: (x["led"], x["id"]))
+            _clap_sw.update(t=now, list=out)
+        except Exception:
+            pass
+    return out
+
+def clap_status():
+    c = _clap_load()
+    try:
+        stat = json.load(open(CLAPSTAT))
+    except Exception:
+        stat = {}
+    return {"enabled": bool(c.get("enabled")),
+            "entities": _clap_entities(c),
+            "sensitivity": c.get("sensitivity", 6),
+            "boost": c.get("boost", 1.0),
+            "dbl_max": c.get("dbl_max", c.get("tune", {}).get("dbl_max", 0.6)),
+            "cooldown": c.get("cooldown", c.get("tune", {}).get("cooldown", 1.2)),
+            "has_token": bool(c.get("ha_token")),
+            "switches": _ha_switches(c), "stat": stat}
+
+def clap_set(q):
+    c = _clap_load()
+    def val(k, cast, lo, hi):
+        if k in q:
+            try:
+                return min(hi, max(lo, cast(q[k][0])))
+            except Exception:
+                return None
+        return None
+    v = val("enabled", int, 0, 1);        c["enabled"] = bool(v) if v is not None else c.get("enabled", True)
+    v = val("sensitivity", int, 1, 10);   c["sensitivity"] = v if v is not None else c.get("sensitivity", 6)
+    v = val("boost", float, 1.0, 8.0);    c["boost"] = round(v, 1) if v is not None else c.get("boost", 1.0)
+    v = val("dbl_max", float, 0.3, 1.2);  c["dbl_max"] = v if v is not None else c.get("dbl_max", 0.6)
+    v = val("cooldown", float, 0.3, 4.0); c["cooldown"] = v if v is not None else c.get("cooldown", 1.2)
+    if "entities" in q:
+        c["entities"] = [e for e in q["entities"][0].split(",") if e and "." in e]
+        c.pop("entity", None)
+    c.pop("tune", None)     # sensitivity/boost supersede the old raw tune block
+    _clap_save(c)
+    return clap_status()
+
+def clap_test():
+    c = _clap_load()
+    ents = _clap_entities(c)
+    if not ents or not c.get("ha_token"):
+        return {"ok": False, "err": "no entity or token"}
+    ok = True
+    for e in ents:
+        try:
+            body = json.dumps({"entity_id": e}).encode()
+            req = urllib.request.Request(
+                c["ha_url"].rstrip("/") + "/api/services/%s/toggle" % e.split(".")[0],
+                data=body, method="POST",
+                headers={"Authorization": "Bearer " + c["ha_token"],
+                         "Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=5)
+        except Exception:
+            ok = False
+    return {"ok": ok, "toggled": ents}
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def _send(self, code, ctype, body):
@@ -664,6 +771,13 @@ class H(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/sf"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, "application/json", json.dumps(set_sf(q.get("t", ["0.03"])[0])).encode())
+        elif self.path.startswith("/api/clap/set"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, "application/json", json.dumps(clap_set(q)).encode())
+        elif self.path.startswith("/api/clap/test"):
+            self._send(200, "application/json", json.dumps(clap_test()).encode())
+        elif self.path.startswith("/api/clap"):
+            self._send(200, "application/json", json.dumps(clap_status()).encode())
         elif self.path.startswith("/api/mictune/set"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, "application/json", json.dumps(mictune_set(q)).encode())

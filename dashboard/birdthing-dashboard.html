@@ -171,10 +171,29 @@
     background:var(--card);box-shadow:inset 0 0 0 2px var(--hair);}
   .mtbar .bfill{border-radius:18px;}
   body.light .mtbar{box-shadow:inset 0 0 0 2px rgba(0,0,0,.18);}
+  /* clap switch picker */
+  .clsw{display:block;width:100%;text-align:left;margin:6px 0;padding:14px 16px;border-radius:12px;
+    background:var(--card);color:var(--fg);border:2px solid transparent;font-size:calc(17px*var(--ts));
+    font-weight:600;font-family:inherit;}
+  .clsw.on{border-color:var(--green);}
+  .clsw .csid{color:var(--sec);font-weight:400;font-size:.82em;}
+  .clmeter{height:26px;background:var(--card);border-radius:13px;overflow:hidden;box-shadow:inset 0 0 0 2px var(--hair);}
+  .clmeter .bfill{transition:width .1s linear;}
   /* pull-to-refresh pill: swipe down from the top to reload */
   #ptr{position:fixed;top:6px;left:50%;transform:translate(-50%,0);background:var(--card);color:var(--fg);
     padding:10px 20px;border-radius:22px;opacity:0;z-index:99998;transition:opacity .15s;font-size:16px;
     pointer-events:none;box-shadow:0 4px 18px rgba(0,0,0,.4);}
+  /* On-screen remote — shown ONLY when the dashboard is embedded (Home Assistant / a browser iframe),
+     so you can scroll and switch views without the Car Thing's physical buttons. Hidden on the CT itself. */
+  #hanav{position:fixed;left:0;bottom:0;width:800px;height:46px;display:none;z-index:100000;
+    background:rgba(18,18,20,.92);border-top:1px solid rgba(255,255,255,.14);}
+  #hanav button{flex:1;height:46px;background:transparent;border:0;color:#fff;font-size:16px;font-weight:600;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;font-family:inherit;}
+  #hanav button:active{background:rgba(255,255,255,.18);}
+  #hanav button+button{border-left:1px solid rgba(255,255,255,.09);}
+  body.embedded #hanav{display:flex;}
+  body.embedded #app{height:434px;grid-template-rows:var(--toph) calc(434px - var(--toph));}
+  body.embedded #facts,body.embedded #wxset,body.embedded .view{bottom:46px;}
   .bbtn{background:var(--card2);border:none;color:var(--fg);font-size:calc(22px*min(var(--ts),1.3));font-weight:700;
     width:56px;min-height:46px;height:auto;border-radius:11px;font-family:inherit;flex:0 0 auto;line-height:1.1;padding:11px 0;
     display:flex;align-items:center;justify-content:center;}
@@ -311,6 +330,9 @@
       <div class="seg2"><button onclick="openAnalytics()">Open today's report</button></div></div>
     <div class="srow"><span class="sk">Wi‑Fi</span>
       <div class="seg2"><button onclick="openWifi()">Change network</button></div></div>
+    <div class="srow"><span class="sk">Clap control</span>
+      <div class="seg2"><button onclick="openClap()">Clap → lights settings</button></div>
+      <span class="about" style="padding:4px 4px 0">Clap twice to toggle chosen lights/switches. Adjust sensitivity &amp; pick switches here.</span></div>
     <div class="srow"><span class="sk">Bird region</span>
       <div class="seg2"><button id="regAuto" onclick="detectLoc()">Auto‑detect</button><button data-reg="New York" onclick="setLoc(40.7128,-74.0060,'New York')">New York</button><button data-reg="North America" onclick="setLoc(39.83,-98.58,'North America')">N. America</button><button data-reg="UK" onclick="setLoc(51.51,-0.13,'UK')">UK</button><button data-reg="India" onclick="setLoc(20.59,78.96,'India')">India</button><button data-reg="Australia" onclick="setLoc(-25.27,133.78,'Australia')">Australia</button></div></div>
     <div class="srow"><span class="sk">Geo filter — precision vs. catch‑all</span>
@@ -355,6 +377,36 @@
     </div>
   </div>
 </div>
+<div id="clapview" class="view">
+  <div class="vhead"><div class="vtitle">Clap → lights</div><div class="vclose" onclick="closeView('clapview')">Back</div></div>
+  <div class="vbody">
+    <div class="about" style="padding:0 4px 8px">Clap twice to toggle the switches you pick below. It listens on the same mic as the birds — this <b>never</b> affects bird ID.</div>
+    <div class="srow"><span class="sk">Clap detection</span>
+      <div class="seg2"><button data-clen="1" onclick="clEnable(1)">On</button><button data-clen="0" onclick="clEnable(0)">Off</button></div></div>
+    <div class="srow" style="gap:6px">
+      <span class="sk">Live meter <span class="mtv" id="clLive"></span></span>
+      <div class="clmeter" style="width:100%"><div class="bfill" id="clMeterPk" style="width:0"></div></div>
+      <span class="about" id="clHint" style="padding:2px 4px 0">Clap now — the bar should jump near the top.</span></div>
+    <div class="srow" style="gap:4px">
+      <div class="mtl">Sensitivity <span class="mtv" id="clSensV"></span></div>
+      <div class="slider mtbar" id="clSens"><div class="bfill" id="clSensF"></div></div>
+      <span class="about" style="padding:2px 0 0">Higher = easier to trigger (but more likely to fire on other loud, sharp sounds). <b>If claps stopped working, nudge this up.</b></span>
+      <div class="mtl">Boost <span class="mtv" id="clBoostV"></span></div>
+      <div class="slider mtbar" id="clBoost"><div class="bfill" id="clBoostF"></div></div>
+      <span class="about" style="padding:2px 0 0">Amplifies the clap signal for a quiet room or a far‑away mic.</span></div>
+    <div class="srow" style="gap:6px">
+      <span class="sk">Switches to toggle</span>
+      <span class="about" style="padding:0 0 2px">Tap to choose which lights/switches a double clap toggles — you can pick more than one.</span>
+      <div id="clSwitches" style="width:100%">Loading…</div>
+      <div class="seg2" style="margin-top:6px"><button onclick="clTest()">Test — toggle now</button></div></div>
+    <div class="srow" style="gap:4px">
+      <div class="mtl">Double‑clap window <span class="mtv" id="clDblV"></span></div>
+      <div class="slider mtbar" id="clDbl"><div class="bfill" id="clDblF"></div></div>
+      <div class="mtl">Cooldown after a toggle <span class="mtv" id="clCoolV"></span></div>
+      <div class="slider mtbar" id="clCool"><div class="bfill" id="clCoolF"></div></div></div>
+    <div class="about" id="clStatus" style="padding:6px 4px 0"></div>
+  </div>
+</div>
 <div id="clockview" class="view">
   <div class="vhead"><div class="vtitle">Clock</div><div class="vclose" onclick="closeView('clockview')">Back</div></div>
   <div class="vbody" style="display:flex;align-items:center;justify-content:center;padding:6px 22px;overflow:hidden;">
@@ -378,6 +430,15 @@
 <div id="yearview" class="view">
   <div class="vhead"><div class="vtitle" id="yearTitle">Year</div><div class="vclose" onclick="closeView('yearview')">Back</div></div>
   <div class="vbody" id="yearBody" style="display:flex;justify-content:center;align-items:center;padding:4px 18px 14px;overflow:hidden;"></div>
+</div>
+<div id="hanav">
+  <button onclick="hk('Escape')">Home</button>
+  <button onclick="hk('ArrowUp')">▲</button>
+  <button onclick="hk('ArrowDown')">▼</button>
+  <button onclick="hk('Enter')">Select</button>
+  <button onclick="hk('2')">Birds</button>
+  <button onclick="hk('3')">Live</button>
+  <button onclick="hk('4')">Settings</button>
 </div>
 <script>
 const VERSION="1.0 (USB)";
@@ -565,10 +626,10 @@ document.addEventListener('keydown',(ev)=>{
   else if(k==='Escape'||k==='Backspace')goLive();
 });
 // ---- Views (gallery / live / settings) ----
-function closeAllOverlays(){closeFacts();['gallery','live','settings','analytics','wifi','spotify','clockview','yearview'].forEach(id=>document.getElementById(id).classList.remove('show'));}
+function closeAllOverlays(){closeFacts();['gallery','live','settings','analytics','wifi','spotify','clapview','clockview','yearview'].forEach(id=>document.getElementById(id).classList.remove('show'));}
 function openView(id){closeAllOverlays();document.getElementById(id).classList.add('show');}
 function closeView(id){document.getElementById(id).classList.remove('show');}
-function curOverlay(){if(factsOpen)return'facts';return ['gallery','live','settings','analytics','wifi','spotify','clockview','yearview'].find(id=>document.getElementById(id).classList.contains('show'));}
+function curOverlay(){if(factsOpen)return'facts';return ['gallery','live','settings','analytics','wifi','spotify','clapview','clockview','yearview'].find(id=>document.getElementById(id).classList.contains('show'));}
 async function openGallery(){openView('gallery');
   const b=document.getElementById('galBody');b.innerHTML='Loading…';
   try{
@@ -971,6 +1032,65 @@ async function mtLoad(){try{const c=await (await fetch('/api/mictune')).json();
   mtSetters.gain(c.gain,false);mtSetters.gate(c.gate,false);mtSetters.conf(c.conf,false);markMt();
   document.getElementById('mtStatus').textContent='';}catch(e){}}
 
+// ---- Clap control (Settings -> Clap page -> /api/clap*). Toggles HA switches on a double
+// clap. Fully separate from BirdNET; sensitivity/boost tune the receiver's clapdetect. ----
+let clVals={enabled:true,sensitivity:6,boost:1,dbl_max:0.6,cooldown:1.2,entities:[]};
+let clT=null,clPoll=null,clSwitches=[],clSetters={};
+const CLDEF={clSens:{key:'sensitivity',min:1,max:10,fmt:v=>Math.round(v)+' / 10'+(v<=3?' (strict)':v>=8?' (very sensitive)':'')},
+  clBoost:{key:'boost',min:1,max:8,fmt:v=>v.toFixed(1)+'×'},
+  clDbl:{key:'dbl_max',min:0.3,max:1.2,fmt:v=>Math.round(v*1000)+' ms apart max'},
+  clCool:{key:'cooldown',min:0.3,max:4,fmt:v=>v.toFixed(1)+' s'}};
+function clBar(id){const o=CLDEF[id],bar=document.getElementById(id),fill=document.getElementById(id+'F'),lbl=document.getElementById(id+'V');
+  function set(v,apply){v=Math.max(o.min,Math.min(o.max,v));clVals[o.key]=v;
+    fill.style.width=(100*(v-o.min)/(o.max-o.min))+'%';lbl.textContent='— '+o.fmt(v);if(apply)clQueue();}
+  function fromE(e){const r=bar.getBoundingClientRect();set(o.min+((e.clientX-r.left)/r.width)*(o.max-o.min),false);}
+  let d=false;
+  bar.addEventListener('pointerdown',e=>{d=true;bar.classList.add('active');try{bar.setPointerCapture(e.pointerId);}catch(_){}fromE(e);});
+  bar.addEventListener('pointermove',e=>{if(d)fromE(e);});
+  ['pointerup','pointercancel'].forEach(ev=>bar.addEventListener(ev,()=>{if(d){d=false;bar.classList.remove('active');clQueue();}}));
+  return set;}
+function clQueue(){clearTimeout(clT);const st=document.getElementById('clStatus');st.textContent='Saving…';
+  clT=setTimeout(async()=>{try{
+    const p=new URLSearchParams({enabled:clVals.enabled?1:0,sensitivity:Math.round(clVals.sensitivity),
+      boost:clVals.boost.toFixed(1),dbl_max:clVals.dbl_max.toFixed(2),cooldown:clVals.cooldown.toFixed(1),
+      entities:clVals.entities.join(',')});
+    await fetch('/api/clap/set?'+p.toString());st.textContent='Saved ✓';
+  }catch(e){st.textContent='Save failed — try again';}},500);}
+function clMark(){document.querySelectorAll('[data-clen]').forEach(b=>b.classList.toggle('on',+b.dataset.clen===(clVals.enabled?1:0)));}
+function clEnable(v){clVals.enabled=!!v;clMark();clQueue();}
+function clRenderSwitches(){const box=document.getElementById('clSwitches');
+  if(!clSwitches.length){box.innerHTML='<div class="about">No Home Assistant switches found — check the HA token.</div>';return;}
+  box.innerHTML='';clSwitches.forEach(s=>{const on=clVals.entities.includes(s.id);
+    const b=document.createElement('button');b.className='clsw'+(on?' on':'');
+    b.innerHTML=(on?'☑ ':'☐ ')+s.name+' <span class="csid">· '+s.id+'</span>';
+    b.onclick=()=>{const i=clVals.entities.indexOf(s.id);if(i>=0)clVals.entities.splice(i,1);else clVals.entities.push(s.id);clRenderSwitches();clQueue();};
+    box.appendChild(b);});}
+async function clTest(){const st=document.getElementById('clStatus');st.textContent='Toggling…';
+  try{const r=await (await fetch('/api/clap/test')).json();
+    st.textContent=r.ok?('Toggled: '+(r.toggled||[]).join(', ')):('Test failed: '+(r.err||'check switches/token'));}
+  catch(e){st.textContent='Test failed';}}
+function clMeter(stat){if(!stat)return;const MAX=32767,pk=stat.peak||0;
+  const f=document.getElementById('clMeterPk');if(f)f.style.width=Math.min(100,100*pk/MAX)+'%';
+  const lv=document.getElementById('clLive');if(lv&&stat.peak!=null)lv.textContent='— peak '+pk+' · background '+(stat.bg||0);
+  const h=document.getElementById('clHint');if(!h)return;
+  if(stat.last_double_ago!=null&&stat.last_double_ago<8)h.textContent='✅ Double clap detected '+stat.last_double_ago+'s ago — switch toggled!';
+  else if(stat.last_single_ago!=null&&stat.last_single_ago<4)h.textContent='Heard one clap '+stat.last_single_ago+'s ago — clap twice quickly to toggle.';
+  else h.textContent='Clap — the bar should jump near the top. '+(stat.doubles||0)+' double‑claps so far.';}
+async function openClap(){openView('clapview');const st=document.getElementById('clStatus');st.textContent='';
+  if(!clSetters.clSens){clSetters={clSens:clBar('clSens'),clBoost:clBar('clBoost'),clDbl:clBar('clDbl'),clCool:clBar('clCool')};}
+  try{const c=await (await fetch('/api/clap')).json();
+    clVals.enabled=c.enabled;clVals.sensitivity=c.sensitivity;clVals.boost=c.boost;
+    clVals.dbl_max=c.dbl_max;clVals.cooldown=c.cooldown;clVals.entities=c.entities||[];clSwitches=c.switches||[];
+    clSetters.clSens(c.sensitivity,false);clSetters.clBoost(c.boost,false);clSetters.clDbl(c.dbl_max,false);clSetters.clCool(c.cooldown,false);
+    clMark();clRenderSwitches();clMeter(c.stat);
+    if(!c.has_token)st.textContent='⚠ No Home Assistant token configured.';
+    else if(!c.switches.length)st.textContent='⚠ Could not reach Home Assistant to list switches.';
+  }catch(e){st.textContent='Could not load clap settings.';}
+  clearInterval(clPoll);
+  clPoll=setInterval(async()=>{
+    if(!document.getElementById('clapview').classList.contains('show')){clearInterval(clPoll);return;}
+    try{const c=await (await fetch('/api/clap')).json();clMeter(c.stat);}catch(_){}},700);}
+
 // ---- Universal drag-scroll + pull-to-refresh. The Car Thing touchscreen presents as a mouse
 // (USB HID pointer), so native touch scrolling never kicks in — implement dragging with pointer
 // events. Swipe down from the top past the threshold to reload. ----
@@ -1000,6 +1120,15 @@ async function mtLoad(){try{const c=await (await fetch('/api/mictune')).json();
   // a drag that scrolled shouldn't also fire the click underneath it
   document.addEventListener('click',e=>{if(moved>14){e.stopPropagation();e.preventDefault();moved=0;}},true);
 })();
+
+// ---- On-screen remote for embedded use (Home Assistant / any iframe) ----
+// Each button fires the SAME key the physical Car Thing remote sends, so the existing
+// navigation handles it: Home=Esc, ▲/▼=knob up/down (scroll+select), Select=Enter (open),
+// Birds/Live/Settings = top buttons 2/3/4. Scrolling also works by dragging inside the frame.
+function hk(key){document.dispatchEvent(new KeyboardEvent('keydown',{key:key,bubbles:true}));}
+// Show the remote only when we're NOT the top window (i.e. embedded in HA/an iframe), or when
+// ?nav=1 is passed. On the Car Thing itself it's top-level, so the bar stays hidden.
+try{if(window.self!==window.top||/[?&]nav=1/.test(location.search))document.body.classList.add('embedded');}catch(e){document.body.classList.add('embedded');}
 </script>
 </body>
 </html>
