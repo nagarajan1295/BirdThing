@@ -4,13 +4,34 @@
 # touching bird frequencies (birds are ~300 Hz and up), so unlike aggressive band/gate filtering it
 # doesn't cost detections. Runs on the BirdNET venv python (numpy+scipy). On ANY error it falls back
 # to plain passthrough so the pipeline can never break. Single writer to aplay.stdin (no deadlock).
-import socket, subprocess, time, os
+import socket, subprocess, time, os, threading
 
 try:
     import clapdetect            # double-clap -> Home Assistant light toggle
 except Exception as _e:          # never let the clap add-on break the pipeline
     clapdetect = None
     print("clapdetect unavailable:", _e, flush=True)
+
+
+def _rawmic_listener():
+    # Car Thing mic-health beacon (UDP 9001, JSON with the RAW pre-AGC peak) -> /tmp/bt_rawmic.
+    # The pipeline watchdog reads it to tell "quiet room" from "stuck mic" (file mtime = freshness).
+    try:
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        u.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        u.bind(("0.0.0.0", 9001))
+        while True:
+            d, _ = u.recvfrom(256)
+            try:
+                with open("/tmp/bt_rawmic", "wb") as f:
+                    f.write(d)
+            except Exception:
+                pass
+    except Exception as e:
+        print("rawmic listener disabled:", e, flush=True)
+
+
+threading.Thread(target=_rawmic_listener, daemon=True).start()
 
 PORT = 9000
 _lastlvl = 0.0   # throttle for writing the current loudness to /tmp/bt_level

@@ -702,6 +702,8 @@ def clap_status():
     except Exception:
         stat = {}
     sun = _ha_sun(c)
+    if stat.get("t"):
+        stat["age"] = round(time.time() - stat["t"], 1)   # staleness: >5s = detector not running
     return {"enabled": bool(c.get("enabled")),
             "entities": _clap_entities(c),
             "sensitivity": c.get("sensitivity", 6),

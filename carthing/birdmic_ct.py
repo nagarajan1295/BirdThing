@@ -7,18 +7,29 @@ import ctypes, socket, signal, sys, time, array
 
 PI_HOST = "192.168.7.1"
 PI_PORT = 9000
+BEACON_PORT = 9001   # UDP mic-health beacon -> Pi: {"t":..,"raw":..,"gain":..} every ~2s.
+                     # The RAW (pre-AGC) peak is the mic-health ground truth: a healthy PDM
+                     # always reads self-noise > NOISE_FLOOR even in a silent room, so the
+                     # Pi watchdog can tell "quiet room" from "stuck mic" without SSH.
 WAIT_MS = 2000  # if no audio for this long, the PDM stalled -> reopen
 # Auto gain: scale each chunk so its peak approaches TARGET_PEAK, smoothed to avoid pumping.
 # A noise gate keeps near-silence from being blown up into false detections.
 TARGET_PEAK = 9000
 MAX_GAIN = 120
 MIN_GAIN = 1
-NOISE_FLOOR = 25   # raw peak below this is treated as silence (gain held low)
-QUIET_RECOVER_SEC = 20  # if raw stays below NOISE_FLOOR this long the PDM has gone "stuck-quiet"
+NOISE_FLOOR = 25   # raw peak below this is treated as silence (gain held low; user-tunable slider)
+STUCK_FLOOR = 20   # FIXED stuck-quiet threshold, deliberately decoupled from NOISE_FLOOR: when the
+                   # user raised the gate slider to 110, the reopen-watchdog inherited it and
+                   # reopened the PDM every 20s during perfectly healthy low-noise periods -> the
+                   # "mic flapping" churn. Hardware-stuck is raw < ~20 regardless of taste in gating.
+QUIET_RECOVER_SEC = 20  # if raw stays below STUCK_FLOOR this long the PDM has gone "stuck-quiet"
                         # (still streaming but ~silent) -> reopen to recover. A healthy mic always
-                        # reads some self-noise (>25), so genuine quiet won't false-trigger badly.
+                        # reads some self-noise (>25), so genuine quiet won't false-trigger.
 _gain = [8.0]
 _quiet_since = [None]
+_usock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+_braw = [0]          # max raw peak since the last beacon
+_bt = [0.0]          # last beacon time
 
 a = ctypes.CDLL("libasound.so.2")
 a.snd_pcm_readi.restype = ctypes.c_long
@@ -92,7 +103,18 @@ while _run[0]:
     # watchdog for the "stuck-quiet" PDM state: snd_pcm_wait keeps returning data so the normal
     # stall-reopen never fires, but the data is ~silent. After a sustained quiet run, reopen.
     nowt = time.time()
-    if peak < NOISE_FLOOR:
+    # mic-health beacon (fire-and-forget UDP; must never affect the audio path)
+    if peak > _braw[0]:
+        _braw[0] = peak
+    if nowt - _bt[0] >= 2.0:
+        try:
+            _usock.sendto(b'{"t":%d,"raw":%d,"gain":%d}'
+                          % (int(nowt), int(_braw[0]), int(_gain[0])), (PI_HOST, BEACON_PORT))
+        except Exception:
+            pass
+        _bt[0] = nowt
+        _braw[0] = 0
+    if peak < STUCK_FLOOR:
         if _quiet_since[0] is None:
             _quiet_since[0] = nowt
         elif nowt - _quiet_since[0] > QUIET_RECOVER_SEC:

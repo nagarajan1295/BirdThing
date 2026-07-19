@@ -41,7 +41,7 @@ except Exception:
 # runtime state
 _buf = b""            # leftover bytes < one FRAME
 _bg = 1000.0          # background peak level (EMA), on the boosted signal
-_prev_pk = 0.0        # previous frame's boosted peak (for the "quiet before" onset gate)
+_hist = [0.0, 0.0, 0.0]   # last 3 boosted frame peaks (for the "quiet before" onset gate)
 _last_edge = 0.0      # time of the last accepted clap edge
 _last_double = 0.0    # time of the last accepted double clap
 _muted_until = 0.0    # cooldown end after a toggle
@@ -49,6 +49,11 @@ _singles = 0          # counters (for the dashboard)
 _doubles = 0
 _pk_hold = 0.0        # loudest raw peak since the last stat publish
 _stat_t = 0.0
+# mic-health: rolling max of the RAW peak over ~2x30s windows. A healthy room always
+# spikes past 30 within a minute (fridge, steps, voices); a stuck-quiet PDM never does.
+_mw_start = 0.0
+_mw_cur = 0.0
+_mw_prev = 30000.0    # assume healthy until a full window proves otherwise
 _cfg = None
 _cfg_mtime = 0.0
 
@@ -160,15 +165,19 @@ def _fire_toggle():
         domain = e.split(".")[0]
         url = c["ha_url"].rstrip("/") + "/api/services/%s/toggle" % domain
         body = json.dumps({"entity_id": e}).encode()
-        req = urllib.request.Request(
-            url, data=body, method="POST",
-            headers={"Authorization": "Bearer " + c["ha_token"],
-                     "Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=4) as r:
-                _log("toggled %s -> HTTP %s" % (e, r.status))
-        except Exception as ex:
-            _log("toggle FAILED for %s: %s" % (e, ex))
+        for attempt in (1, 2):           # one retry: a momentary HA hiccup mustn't eat a clap
+            req = urllib.request.Request(
+                url, data=body, method="POST",
+                headers={"Authorization": "Bearer " + c["ha_token"],
+                         "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=4) as r:
+                    _log("toggled %s -> HTTP %s" % (e, r.status))
+                break
+            except Exception as ex:
+                _log("toggle %s for %s: %s" % ("retrying" if attempt == 1 else "FAILED", e, ex))
+                if attempt == 1:
+                    time.sleep(0.8)
 
 
 def _tune(c):
@@ -186,13 +195,25 @@ def _tune(c):
     return min_peak, ratio, boost, dbl_max, cooldown
 
 
-def _publish_stat(now, bg, sens, boost, min_peak, ratio, enabled):
+def _mic_quiet(now, raw_pk):
+    # rolling ~60s view of the raw peak; True = the PDM mic looks stuck-quiet
+    global _mw_start, _mw_cur, _mw_prev
+    if _mw_start == 0.0:
+        _mw_start = now
+    if raw_pk > _mw_cur:
+        _mw_cur = raw_pk
+    if now - _mw_start >= 30.0:          # roll the 30s window
+        _mw_prev, _mw_cur, _mw_start = _mw_cur, 0.0, now
+    return max(_mw_cur, _mw_prev) < 30
+
+
+def _publish_stat(now, bg, sens, boost, min_peak, ratio, enabled, mic_quiet):
     global _stat_t, _pk_hold
     if now - _stat_t < STAT_EVERY:
         return
     _stat_t = now
     try:
-        st = {"t": now, "enabled": bool(enabled),
+        st = {"t": now, "enabled": bool(enabled), "mic_quiet": bool(mic_quiet),
               "bg": round(bg / max(boost, 1e-6)), "peak": round(_pk_hold),
               "sens": sens, "boost": boost,
               "min_peak": round(min_peak / max(boost, 1e-6)), "ratio": round(ratio, 2),
@@ -225,7 +246,7 @@ def _on_edge(now, dbl_max, cooldown):
 
 def feed(mono):
     """Feed a 1-D int16 numpy array of mono samples. Never raises."""
-    global _buf, _bg, _prev_pk, _pk_hold
+    global _buf, _bg, _pk_hold
     if _np is None:
         return
     try:
@@ -248,10 +269,13 @@ def feed(mono):
             now += FRAME / RATE
             if raw_pk > _pk_hold:
                 _pk_hold = raw_pk
-            # onset = a sharp RISE: the frame before must be much quieter than this
-            # one. Relative (not an absolute floor) so it still fires in a loud room
-            # yet rejects sustained loud noise (music/TV) where levels don't jump.
-            quiet_before = _prev_pk < 0.5 * pk
+            mq = _mic_quiet(now, raw_pk)
+            # onset = a sharp RISE above the RECENT quietest point. Using the min of the
+            # last 3 frames (~32ms) instead of just the previous frame means a clap whose
+            # attack straddles a frame boundary still registers (the frame right before
+            # may hold half the rise), while sustained loud noise (music/TV) — where all
+            # recent frames are loud — still fails the test.
+            quiet_before = min(_hist) < 0.5 * pk
             is_clap = (enabled and now >= _muted_until and quiet_before
                        and pk >= min_peak and pk >= ratio * _bg
                        and (now - _last_edge) >= REFRACTORY)
@@ -260,8 +284,8 @@ def feed(mono):
             else:
                 # only quiet frames update the background (claps mustn't inflate it)
                 _bg = (1 - BG_ALPHA) * _bg + BG_ALPHA * min(pk, _bg * 3 + 200)
-            _prev_pk = pk
-            _publish_stat(now, _bg, sens, boost, min_peak, ratio, enabled)
+            _hist[0], _hist[1], _hist[2] = _hist[1], _hist[2], pk
+            _publish_stat(now, _bg, sens, boost, min_peak, ratio, enabled, mq)
     except Exception as e:
         _log("feed error: %s" % e)
 

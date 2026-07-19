@@ -1102,6 +1102,9 @@ function clMeter(stat){if(!stat)return;const MAX=32767,pk=stat.peak||0;
   const f=document.getElementById('clMeterPk');if(f)f.style.width=Math.min(100,100*pk/MAX)+'%';
   const lv=document.getElementById('clLive');if(lv&&stat.peak!=null)lv.textContent='— peak '+pk+' · background '+(stat.bg||0);
   const h=document.getElementById('clHint');if(!h)return;
+  // health first: tuning advice is meaningless if the detector or mic is down
+  if(stat.age!=null&&stat.age>5){h.textContent='⚠ Clap detector offline (receiver restarting?) — wait a few seconds.';return;}
+  if(stat.mic_quiet){h.textContent='⚠ The mic has gone silent — self‑repair kicks in within ~2 min. Claps AND bird ID are down until it recovers (this is the mic, not your settings).';return;}
   if(stat.last_double_ago!=null&&stat.last_double_ago<8)h.textContent='✅ Double clap detected '+stat.last_double_ago+'s ago — switch toggled!';
   else if(stat.last_single_ago!=null&&stat.last_single_ago<4)h.textContent='Heard one clap '+stat.last_single_ago+'s ago — clap twice quickly to toggle.';
   else h.textContent='Clap — the bar should jump near the top. '+(stat.doubles||0)+' double‑claps so far.';}
