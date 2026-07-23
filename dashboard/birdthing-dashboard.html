@@ -337,7 +337,7 @@
       <div class="seg2"><button onclick="openClap()">Clap → lights settings</button></div>
       <span class="about" style="padding:4px 4px 0">Clap twice to toggle chosen lights/switches. Adjust sensitivity &amp; pick switches here.</span></div>
     <div class="srow"><span class="sk">Bird region</span>
-      <div class="seg2"><button id="regAuto" onclick="detectLoc()">Auto‑detect</button><button data-reg="New York" onclick="setLoc(40.7128,-74.0060,'New York')">New York</button><button data-reg="North America" onclick="setLoc(39.83,-98.58,'North America')">N. America</button><button data-reg="UK" onclick="setLoc(51.51,-0.13,'UK')">UK</button><button data-reg="India" onclick="setLoc(20.59,78.96,'India')">India</button><button data-reg="Australia" onclick="setLoc(-25.27,133.78,'Australia')">Australia</button></div></div>
+      <div class="seg2"><button id="regAuto" onclick="detectLoc()">Auto‑detect</button><button data-reg="Potsdam NY" onclick="setLoc(44.6698,-74.9813,'Potsdam NY')">Potsdam NY</button><button data-reg="North America" onclick="setLoc(39.83,-98.58,'North America')">N. America</button><button data-reg="UK" onclick="setLoc(51.51,-0.13,'UK')">UK</button><button data-reg="India" onclick="setLoc(20.59,78.96,'India')">India</button><button data-reg="Australia" onclick="setLoc(-25.27,133.78,'Australia')">Australia</button></div></div>
     <div class="srow"><span class="sk">Geo filter — precision vs. catch‑all</span>
       <div class="seg2"><button data-sf="0.08" onclick="setSf(0.08)">Strict</button><button data-sf="0.03" onclick="setSf(0.03)">Loose</button><button data-sf="0" onclick="setSf(0)">Off (catch‑all)</button></div>
       <span class="about" id="locNote" style="padding:4px 4px 0"></span></div>
@@ -1107,7 +1107,8 @@ function clMeter(stat){if(!stat)return;const MAX=32767,pk=stat.peak||0;
   if(stat.mic_quiet){h.textContent='⚠ The mic has gone silent — self‑repair kicks in within ~2 min. Claps AND bird ID are down until it recovers (this is the mic, not your settings).';return;}
   if(stat.last_double_ago!=null&&stat.last_double_ago<8)h.textContent='✅ Double clap detected '+stat.last_double_ago+'s ago — switch toggled!';
   else if(stat.last_single_ago!=null&&stat.last_single_ago<4)h.textContent='Heard one clap '+stat.last_single_ago+'s ago — clap twice quickly to toggle.';
-  else h.textContent='Clap — the bar should jump near the top. '+(stat.doubles||0)+' double‑claps so far.';}
+  else h.textContent='Clap — the bar should jump near the top. '+(stat.doubles||0)+' double‑claps so far.'+
+    (stat.glitches?' ('+stat.glitches+' hardware glitch spikes were correctly ignored.)':'');}
 async function openClap(){openView('clapview');const st=document.getElementById('clStatus');st.textContent='';
   if(!clSetters.clSens){clSetters={clSens:clBar('clSens'),clBoost:clBar('clBoost'),clDbl:clBar('clDbl'),clCool:clBar('clCool')};}
   try{const c=await (await fetch('/api/clap')).json();

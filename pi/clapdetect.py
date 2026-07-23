@@ -31,6 +31,8 @@ BG_ALPHA   = 0.04     # EMA rate for the slow background level
 REFRACTORY = 0.12     # ignore new onsets this long after one (a clap's decay/echo)
 DBL_MIN    = 0.09     # two edges closer than this = same clap, not a pair
 STAT_EVERY = 0.4      # how often to publish the live tuning stats
+DECAY_MIN_FRAC = 0.20  # candidate onset must retain >=20% of its peak one frame later
+                       # (real acoustic decay) or it's rejected as a hardware glitch pop
 
 _np = None
 try:
@@ -49,6 +51,9 @@ _singles = 0          # counters (for the dashboard)
 _doubles = 0
 _pk_hold = 0.0        # loudest raw peak since the last stat publish
 _stat_t = 0.0
+_pending = None       # candidate onset awaiting next-frame decay confirmation:
+                       # (peak_time, peak_pk, dbl_max, cooldown) or None
+_glitches = 0          # onsets rejected for lacking acoustic decay (diagnostics)
 # mic-health: rolling max of the RAW peak over ~2x30s windows. A healthy room always
 # spikes past 30 within a minute (fridge, steps, voices); a stuck-quiet PDM never does.
 _mw_start = 0.0
@@ -217,7 +222,7 @@ def _publish_stat(now, bg, sens, boost, min_peak, ratio, enabled, mic_quiet):
               "bg": round(bg / max(boost, 1e-6)), "peak": round(_pk_hold),
               "sens": sens, "boost": boost,
               "min_peak": round(min_peak / max(boost, 1e-6)), "ratio": round(ratio, 2),
-              "singles": _singles, "doubles": _doubles,
+              "singles": _singles, "doubles": _doubles, "glitches": _glitches,
               "last_single_ago": round(now - _last_edge, 1) if _last_edge else None,
               "last_double_ago": round(now - _last_double, 1) if _last_double else None}
         tmp = STAT_PATH + ".tmp"
@@ -246,7 +251,7 @@ def _on_edge(now, dbl_max, cooldown):
 
 def feed(mono):
     """Feed a 1-D int16 numpy array of mono samples. Never raises."""
-    global _buf, _bg, _pk_hold
+    global _buf, _bg, _pk_hold, _pending, _glitches
     if _np is None:
         return
     try:
@@ -270,17 +275,36 @@ def feed(mono):
             if raw_pk > _pk_hold:
                 _pk_hold = raw_pk
             mq = _mic_quiet(now, raw_pk)
+
+            # DECAY CONFIRMATION: a real clap is an acoustic event with physical
+            # persistence -- the room's reverb means the NEXT ~10.7ms frame is still
+            # meaningfully loud. A hardware glitch (the PDM mic is the same board
+            # design as the ALS that failed at the silicon level -- see memory) is
+            # an instantaneous electrical pop: one sample-frame spike that snaps
+            # straight back to the noise floor with nothing in the frame after it.
+            # So a candidate onset is held for exactly one extra frame (~11ms,
+            # negligible next to the 90ms+ double-clap gap) and only accepted if
+            # the following frame still carries real energy.
+            if _pending is not None:
+                p_time, p_pk, p_dbl_max, p_cooldown = _pending
+                _pending = None
+                if pk >= DECAY_MIN_FRAC * p_pk:
+                    _on_edge(p_time, p_dbl_max, p_cooldown)
+                else:
+                    _glitches += 1
+                    _log("glitch rejected (peak=%.0f next=%.0f, no decay)" % (p_pk, pk))
+
             # onset = a sharp RISE above the RECENT quietest point. Using the min of the
             # last 3 frames (~32ms) instead of just the previous frame means a clap whose
             # attack straddles a frame boundary still registers (the frame right before
             # may hold half the rise), while sustained loud noise (music/TV) — where all
             # recent frames are loud — still fails the test.
             quiet_before = min(_hist) < 0.5 * pk
-            is_clap = (enabled and now >= _muted_until and quiet_before
-                       and pk >= min_peak and pk >= ratio * _bg
-                       and (now - _last_edge) >= REFRACTORY)
-            if is_clap:
-                _on_edge(now, dbl_max, cooldown)
+            is_candidate = (enabled and now >= _muted_until and quiet_before
+                            and pk >= min_peak and pk >= ratio * _bg
+                            and (now - _last_edge) >= REFRACTORY)
+            if is_candidate:
+                _pending = (now, pk, dbl_max, cooldown)
             else:
                 # only quiet frames update the background (claps mustn't inflate it)
                 _bg = (1 - BG_ALPHA) * _bg + BG_ALPHA * min(pk, _bg * 3 + 200)
