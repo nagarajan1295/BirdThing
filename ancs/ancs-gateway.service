@@ -1,0 +1,14 @@
+[Unit]
+Description=ANCS gateway - iPhone notifications from BLE to the house displays
+After=ancs-prep.service bluetooth.service
+Requires=ancs-prep.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -u /opt/ancs/ancs_gateway.py
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

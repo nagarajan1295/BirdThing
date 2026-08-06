@@ -764,6 +764,28 @@ def clap_test():
     return {"ok": ok, "toggled": ents}
 
 
+# --- ANCS iPhone notifications ---
+# Same-origin proxy for the ANCS gateway (BirdThing Pi :8099) so the Car
+# Thing's browser can read iPhone notifications; it has no route to that host
+# or port itself. Short cache so a 2.5s UI poll can't stampede the gateway.
+_ancs_cache = {"t": 0.0, "d": {"ok": False, "linked": False, "items": []}}
+ANCS_URL = "http://127.0.0.1:8099/api/notifications"
+
+
+def notify():
+    now = time.time()
+    if now - _ancs_cache["t"] < 1.0:
+        return _ancs_cache["d"]
+    try:
+        with urllib.request.urlopen(ANCS_URL, timeout=3) as r:
+            _ancs_cache["d"] = json.loads(r.read().decode())
+    except Exception as e:
+        _ancs_cache["d"] = {"ok": False, "linked": False, "items": [],
+                            "error": str(e)[:120]}
+    _ancs_cache["t"] = now
+    return _ancs_cache["d"]
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def _send(self, code, ctype, body):
@@ -783,6 +805,8 @@ class H(BaseHTTPRequestHandler):
                 self.end_headers(); self.wfile.write(body)
             except Exception as e:
                 self._send(500, "text/plain", str(e).encode())
+        elif self.path.startswith("/api/notify"):
+            self._send(200, "application/json", json.dumps(notify()).encode())
         elif self.path.startswith("/api/detections"):
             self._send(200, "application/json", json.dumps(detections()).encode())
         elif self.path.startswith("/api/bydate"):

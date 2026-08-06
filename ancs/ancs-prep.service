@@ -1,0 +1,13 @@
+[Unit]
+Description=Prepare hci0 as an LE-only ANCS peripheral (BirdThing)
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/ancs/ancs-prep.sh
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target
