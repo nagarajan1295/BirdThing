@@ -16,9 +16,43 @@
 #   sensitivity 1..10  -> how far above background a clap must jump (+ a floor)
 #   boost       1..8   -> gain applied to the detection signal (for a quiet/far mic)
 #
+# TWO DETECTION MODES, live-switchable via clap.json "mode" (dashboard toggle):
+#   "amplitude" -- any onset that's loud enough and isn't an instantaneous
+#     hardware-glitch pop fires INSTANTLY. Reacts to any loud noise shaped like
+#     a sharp rise-then-partial-decay, claps included -- the naive/fast option.
+#   "smart" (default) -- the SAME fast onset detection, but a real double-clap
+#     candidate is confirmed by YAMNet (below) before the toggle fires. More
+#     accurate, costs roughly a second of extra latency per pair while ML
+#     confirms.
+#
+# YAMNET CONFIRMATION (mode="smart"): Google's YAMNet -- a pretrained, open-
+# source (Apache-2.0), AudioSet-trained sound-event classifier used worldwide
+# in real shipped products and research (see yamnet_clap.py for model details).
+# History worth recording here: an earlier version of this file tried to do
+# clap-vs-voice discrimination itself with a hand-rolled spectral-flatness +
+# decay-duration heuristic. Tested against REAL recorded audio (not synthetic
+# approximations), it correctly rejected real coughs/laughs -- but ALSO
+# incorrectly rejected real hand claps (a real clap's reverberant decay commonly
+# runs longer, and its early spectrum looks different, than the clean synthetic
+# model the heuristic was tuned against). That's a false-negative bug users
+# would experience as "my claps don't work." YAMNet, tested against the same
+# real audio, cleanly separated clap (0.89-0.94 clap-family score) from voice
+# (0.33 voice-family score, ~0.02 clap-family) with a wide margin -- so it now
+# owns the actual accept/reject decision in smart mode; the heuristic was
+# removed rather than layered underneath a step that could veto it.
+#
+# Once the onset detector below provisionally accepts a double clap, a
+# background thread buffers ~1s of audio starting at the first clap (from the
+# rolling `_ring`) and asks YAMNet whether "Clapping"-family classes actually
+# dominate over "Speech/voice"-family classes before the HA toggle fires. Fails
+# OPEN (fires anyway) if the model is missing or inference errors, so a
+# software problem in this layer can never silently stop the light from
+# responding to a real double clap.
+#
 # DEFENSIVE: every public entry point swallows its own errors. Nothing in here
 # may ever raise into birdthing_recv and break the pipeline.
 import json, os, time, threading, urllib.request, datetime
+from collections import deque
 
 CFG_PATH  = os.environ.get("CLAP_CFG", "/opt/birdthing/clap.json")
 LOG_PATH  = os.environ.get("CLAP_LOG", "/tmp/bt_clap.log")
@@ -33,12 +67,21 @@ DBL_MIN    = 0.09     # two edges closer than this = same clap, not a pair
 STAT_EVERY = 0.4      # how often to publish the live tuning stats
 DECAY_MIN_FRAC = 0.20  # candidate onset must retain >=20% of its peak one frame later
                        # (real acoustic decay) or it's rejected as a hardware glitch pop
+RING_MAX_SEC   = 2.0   # how much recent raw mono audio stays buffered for YAMNet
+ML_WAIT_TIMEOUT = 2.5  # give up waiting for enough post-clap audio after this long
+                       # (mic stall etc.) and fail OPEN rather than hang forever
 
 _np = None
 try:
     import numpy as _np
 except Exception:
     _np = None
+
+yamnet_clap = None
+try:
+    import yamnet_clap
+except Exception as _e:
+    yamnet_clap = None
 
 # runtime state
 _buf = b""            # leftover bytes < one FRAME
@@ -54,6 +97,10 @@ _stat_t = 0.0
 _pending = None       # candidate onset awaiting next-frame decay confirmation:
                        # (peak_time, peak_pk, dbl_max, cooldown) or None
 _glitches = 0          # onsets rejected for lacking acoustic decay (diagnostics)
+_ring = deque()        # rolling (timestamp, raw_frame) buffer feeding YAMNet windows
+_ml_confirmed = 0       # smart-mode doubles the ML layer agreed were real claps
+_ml_rejected = 0        # smart-mode doubles the ML layer said were NOT a clap
+_ml_unavailable = 0     # ML confirmation attempted but couldn't run (fail-open count)
 # mic-health: rolling max of the RAW peak over ~2x30s windows. A healthy room always
 # spikes past 30 within a minute (fridge, steps, voices); a stuck-quiet PDM never does.
 _mw_start = 0.0
@@ -94,9 +141,10 @@ def _load_cfg():
         with open(CFG_PATH) as f:
             c = json.load(f)
         _cfg, _cfg_mtime = c, m
-        _log("config: entities=%s enabled=%s sens=%s boost=%s after_sunset=%s pre_min=%s"
+        _log("config: entities=%s enabled=%s sens=%s boost=%s mode=%s after_sunset=%s pre_min=%s"
              % (_entities(c), c.get("enabled"), c.get("sensitivity", 6),
-                c.get("boost", 1.0), c.get("after_sunset", False), c.get("pre_sunset_min", 0)))
+                c.get("boost", 1.0), c.get("mode", "smart"),
+                c.get("after_sunset", False), c.get("pre_sunset_min", 0)))
         return c
     except Exception as e:
         _log("config error: %s" % e)
@@ -212,7 +260,7 @@ def _mic_quiet(now, raw_pk):
     return max(_mw_cur, _mw_prev) < 30
 
 
-def _publish_stat(now, bg, sens, boost, min_peak, ratio, enabled, mic_quiet):
+def _publish_stat(now, bg, sens, boost, min_peak, ratio, enabled, mic_quiet, mode):
     global _stat_t, _pk_hold
     if now - _stat_t < STAT_EVERY:
         return
@@ -223,6 +271,9 @@ def _publish_stat(now, bg, sens, boost, min_peak, ratio, enabled, mic_quiet):
               "sens": sens, "boost": boost,
               "min_peak": round(min_peak / max(boost, 1e-6)), "ratio": round(ratio, 2),
               "singles": _singles, "doubles": _doubles, "glitches": _glitches,
+              "mode": mode, "ml_available": bool(yamnet_clap and yamnet_clap.AVAILABLE),
+              "ml_confirmed": _ml_confirmed, "ml_rejected": _ml_rejected,
+              "ml_unavailable": _ml_unavailable,
               "last_single_ago": round(now - _last_edge, 1) if _last_edge else None,
               "last_double_ago": round(now - _last_double, 1) if _last_double else None}
         tmp = STAT_PATH + ".tmp"
@@ -234,11 +285,12 @@ def _publish_stat(now, bg, sens, boost, min_peak, ratio, enabled, mic_quiet):
     _pk_hold = 0.0
 
 
-def _on_edge(now, dbl_max, cooldown):
+def _on_edge(now, dbl_max, cooldown, mode):
     # an accepted clap edge at time `now`; decide single vs double
     global _last_edge, _last_double, _muted_until, _singles, _doubles
     _singles += 1
     gap = now - _last_edge
+    prev_edge = _last_edge          # the first clap's onset time, for the ML window
     _last_edge = now
     if DBL_MIN <= gap <= dbl_max:
         _muted_until = now + cooldown
@@ -246,7 +298,50 @@ def _on_edge(now, dbl_max, cooldown):
         _last_double = now
         _doubles += 1
         _log("DOUBLE CLAP (gap=%.0fms)" % (gap * 1000))
-        threading.Thread(target=_fire_toggle, daemon=True).start()
+        if mode == "smart" and yamnet_clap is not None and yamnet_clap.AVAILABLE:
+            threading.Thread(target=_ml_confirm_and_fire, args=(prev_edge,), daemon=True).start()
+        else:
+            threading.Thread(target=_fire_toggle, daemon=True).start()
+
+
+def _ring_extract(t0, t1):
+    # best-effort concatenation of buffered raw frames covering [t0, t1]
+    chunks = [fr for (t, fr) in _ring if t0 - FRAME / RATE <= t <= t1 + FRAME / RATE]
+    if not chunks:
+        return None
+    return _np.concatenate(chunks)
+
+
+def _ml_confirm_and_fire(window_start):
+    # Runs off the audio thread. Waits for enough real audio to have streamed in
+    # past the clap (YAMNet needs a fixed ~0.975s window), then asks it whether
+    # this was really a clap before the light actually toggles. Fails OPEN (fires
+    # anyway) on any problem -- an ML bug must never look like "clap stopped
+    # working" to the user.
+    global _ml_confirmed, _ml_rejected, _ml_unavailable
+    try:
+        need_end = window_start + yamnet_clap.WINDOW_SAMPLES / float(yamnet_clap.SAMPLE_RATE)
+        deadline = time.time() + ML_WAIT_TIMEOUT
+        while time.time() < deadline:
+            if _ring and _ring[-1][0] >= need_end:
+                break
+            time.sleep(0.05)
+        raw = _ring_extract(window_start, need_end)
+        if raw is None or raw.size < RATE * 0.1:
+            raise RuntimeError("not enough buffered audio")
+        is_clap, cs, vs, top = yamnet_clap.classify(raw, RATE)
+        if is_clap:
+            _ml_confirmed += 1
+            _log("ML confirmed clap (clap=%.2f voice=%.2f top=%s)" % (cs, vs, top))
+            _fire_toggle()
+        else:
+            _ml_rejected += 1
+            _log("ML REJECTED double-clap as non-clap (clap=%.2f voice=%.2f top=%s) -- not toggling"
+                 % (cs, vs, top))
+    except Exception as e:
+        _ml_unavailable += 1
+        _log("ML confirmation failed (%s) -- firing anyway (fail-open)" % e)
+        _fire_toggle()
 
 
 def feed(mono):
@@ -259,6 +354,9 @@ def feed(mono):
         min_peak, ratio, boost, dbl_max, cooldown = _tune(c)
         enabled = bool(c.get("enabled"))
         sens = c.get("sensitivity", 6)
+        mode = c.get("mode", "smart")
+        if mode not in ("smart", "amplitude"):
+            mode = "smart"
         if mono is None or mono.size == 0:
             return
         raw = _buf + mono.astype("<i2").tobytes()
@@ -276,20 +374,26 @@ def feed(mono):
                 _pk_hold = raw_pk
             mq = _mic_quiet(now, raw_pk)
 
-            # DECAY CONFIRMATION: a real clap is an acoustic event with physical
-            # persistence -- the room's reverb means the NEXT ~10.7ms frame is still
-            # meaningfully loud. A hardware glitch (the PDM mic is the same board
-            # design as the ALS that failed at the silicon level -- see memory) is
-            # an instantaneous electrical pop: one sample-frame spike that snaps
-            # straight back to the noise floor with nothing in the frame after it.
-            # So a candidate onset is held for exactly one extra frame (~11ms,
-            # negligible next to the 90ms+ double-clap gap) and only accepted if
-            # the following frame still carries real energy.
+            # keep a rolling buffer of raw audio so a smart-mode double-clap can be
+            # handed a real window of surrounding sound for YAMNet to judge
+            _ring.append((now, fr.copy()))
+            while _ring and _ring[0][0] < now - RING_MAX_SEC:
+                _ring.popleft()
+
+            # DECAY CONFIRMATION (both modes): a real clap is an acoustic event with
+            # physical persistence -- the room's reverb means the NEXT ~10.7ms frame
+            # is still meaningfully loud. A hardware glitch (the PDM mic is the same
+            # board design as the ALS that failed at the silicon level -- see
+            # memory) is an instantaneous electrical pop: one sample-frame spike
+            # that snaps straight back to the noise floor with nothing after it.
+            # This is a HARDWARE workaround, not a clap-vs-voice discriminator, so
+            # it applies in both modes; actual clap-vs-voice discrimination in
+            # smart mode is YAMNet's job (see _on_edge), not this check's.
             if _pending is not None:
                 p_time, p_pk, p_dbl_max, p_cooldown = _pending
                 _pending = None
                 if pk >= DECAY_MIN_FRAC * p_pk:
-                    _on_edge(p_time, p_dbl_max, p_cooldown)
+                    _on_edge(p_time, p_dbl_max, p_cooldown, mode)
                 else:
                     _glitches += 1
                     _log("glitch rejected (peak=%.0f next=%.0f, no decay)" % (p_pk, pk))
@@ -309,7 +413,7 @@ def feed(mono):
                 # only quiet frames update the background (claps mustn't inflate it)
                 _bg = (1 - BG_ALPHA) * _bg + BG_ALPHA * min(pk, _bg * 3 + 200)
             _hist[0], _hist[1], _hist[2] = _hist[1], _hist[2], pk
-            _publish_stat(now, _bg, sens, boost, min_peak, ratio, enabled, mq)
+            _publish_stat(now, _bg, sens, boost, min_peak, ratio, enabled, mq, mode)
     except Exception as e:
         _log("feed error: %s" % e)
 

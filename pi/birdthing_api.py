@@ -39,7 +39,7 @@ WMO = {0:("☀️","Clear"),1:("\U0001f324️","Mainly clear"),
  99:("⛈️","Thunderstorm")}
 
 def load_wconf():
-    c = {"lat": 40.7128, "lon": -74.0060, "unit": "C", "place": "New York, NY"}
+    c = {"lat": 44.6701, "lon": -74.9774, "unit": "C", "place": "Potsdam, NY"}
     try:
         c.update(json.load(open(WCONF)))
     except Exception:
@@ -706,6 +706,7 @@ def clap_status():
         stat["age"] = round(time.time() - stat["t"], 1)   # staleness: >5s = detector not running
     return {"enabled": bool(c.get("enabled")),
             "entities": _clap_entities(c),
+            "mode": c.get("mode", "smart"),
             "sensitivity": c.get("sensitivity", 6),
             "boost": c.get("boost", 1.0),
             "dbl_max": c.get("dbl_max", c.get("tune", {}).get("dbl_max", 0.6)),
@@ -726,6 +727,10 @@ def clap_set(q):
                 return None
         return None
     v = val("enabled", int, 0, 1);        c["enabled"] = bool(v) if v is not None else c.get("enabled", True)
+    if "mode" in q and q["mode"][0] in ("smart", "amplitude"):
+        c["mode"] = q["mode"][0]
+    else:
+        c["mode"] = c.get("mode", "smart")
     v = val("sensitivity", int, 1, 10);   c["sensitivity"] = v if v is not None else c.get("sensitivity", 6)
     v = val("boost", float, 1.0, 8.0);    c["boost"] = round(v, 1) if v is not None else c.get("boost", 1.0)
     v = val("dbl_max", float, 0.3, 1.2);  c["dbl_max"] = v if v is not None else c.get("dbl_max", 0.6)

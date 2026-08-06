@@ -386,6 +386,9 @@
     <div class="about" style="padding:0 4px 8px">Clap twice to toggle the switches you pick below. It listens on the same mic as the birds — this <b>never</b> affects bird ID.</div>
     <div class="srow"><span class="sk">Clap detection</span>
       <div class="seg2"><button data-clen="1" onclick="clEnable(1)">On</button><button data-clen="0" onclick="clEnable(0)">Off</button></div></div>
+    <div class="srow"><span class="sk">Detection mode</span>
+      <div class="seg2"><button data-clmode="smart" onclick="clMode('smart')">Smart</button><button data-clmode="amplitude" onclick="clMode('amplitude')">Simple</button></div>
+      <span class="about" id="clModeNote" style="padding:4px 4px 0"></span></div>
     <div class="srow"><span class="sk">Only after sunset</span>
       <div class="seg2"><button data-clss="1" onclick="clSunset(1)">On</button><button data-clss="0" onclick="clSunset(0)">Off</button></div>
       <span class="about" id="clSunNote" style="padding:4px 4px 0"></span></div>
@@ -1047,7 +1050,7 @@ async function mtLoad(){try{const c=await (await fetch('/api/mictune')).json();
 
 // ---- Clap control (Settings -> Clap page -> /api/clap*). Toggles HA switches on a double
 // clap. Fully separate from BirdNET; sensitivity/boost tune the receiver's clapdetect. ----
-let clVals={enabled:true,after_sunset:false,pre_sunset_min:0,sensitivity:6,boost:1,dbl_max:0.6,cooldown:1.2,entities:[],_night:null,_set:null,_rise:null};
+let clVals={enabled:true,mode:'smart',after_sunset:false,pre_sunset_min:0,sensitivity:6,boost:1,dbl_max:0.6,cooldown:1.2,entities:[],_night:null,_set:null,_rise:null};
 let clT=null,clPoll=null,clSwitches=[],clSetters={};
 const CLDEF={clSens:{key:'sensitivity',min:1,max:10,fmt:v=>Math.round(v)+' / 10'+(v<=3?' (strict)':v>=8?' (very sensitive)':'')},
   clBoost:{key:'boost',min:1,max:8,fmt:v=>v.toFixed(1)+'×'},
@@ -1064,7 +1067,7 @@ function clBar(id){const o=CLDEF[id],bar=document.getElementById(id),fill=docume
   return set;}
 function clQueue(){clearTimeout(clT);const st=document.getElementById('clStatus');st.textContent='Saving…';
   clT=setTimeout(async()=>{try{
-    const p=new URLSearchParams({enabled:clVals.enabled?1:0,after_sunset:clVals.after_sunset?1:0,
+    const p=new URLSearchParams({enabled:clVals.enabled?1:0,mode:clVals.mode,after_sunset:clVals.after_sunset?1:0,
       pre_sunset_min:clVals.pre_sunset_min|0,sensitivity:Math.round(clVals.sensitivity),
       boost:clVals.boost.toFixed(1),dbl_max:clVals.dbl_max.toFixed(2),cooldown:clVals.cooldown.toFixed(1),
       entities:clVals.entities.join(',')});
@@ -1072,6 +1075,12 @@ function clQueue(){clearTimeout(clT);const st=document.getElementById('clStatus'
   }catch(e){st.textContent='Save failed — try again';}},500);}
 function clMark(){document.querySelectorAll('[data-clen]').forEach(b=>b.classList.toggle('on',+b.dataset.clen===(clVals.enabled?1:0)));}
 function clEnable(v){clVals.enabled=!!v;clMark();clQueue();}
+function clModeMark(){document.querySelectorAll('[data-clmode]').forEach(b=>b.classList.toggle('on',b.dataset.clmode===clVals.mode));
+  const n=document.getElementById('clModeNote');if(!n)return;
+  n.textContent=clVals.mode==='smart'
+    ?'Confirms with a real sound-recognition model before toggling — ignores talking/TV/other noise, ~1s slower to react.'
+    :'Toggles on ANY loud double-tap sound instantly — no recognition, so talking or other noise can trigger it too.';}
+function clMode(v){clVals.mode=v;clModeMark();clQueue();}
 function clSunMark(){document.querySelectorAll('[data-clss]').forEach(b=>b.classList.toggle('on',+b.dataset.clss===(clVals.after_sunset?1:0)));
   const pr=document.getElementById('clPreRow');if(pr)pr.style.opacity=clVals.after_sunset?'1':'.45';}
 function clSunset(v){clVals.after_sunset=!!v;clSunMark();clSunNote();clQueue();}
@@ -1106,18 +1115,27 @@ function clMeter(stat){if(!stat)return;const MAX=32767,pk=stat.peak||0;
   if(stat.age!=null&&stat.age>5){h.textContent='⚠ Clap detector offline (receiver restarting?) — wait a few seconds.';return;}
   if(stat.mic_quiet){h.textContent='⚠ The mic has gone silent — self‑repair kicks in within ~2 min. Claps AND bird ID are down until it recovers (this is the mic, not your settings).';return;}
   if(stat.last_double_ago!=null&&stat.last_double_ago<8)h.textContent='✅ Double clap detected '+stat.last_double_ago+'s ago — switch toggled!';
+  else if(stat.mode==='smart'&&stat.ml_rejected&&stat.last_double_ago!=null&&stat.last_double_ago<10)
+    h.textContent='🤔 Heard a double-tap sound but the recognizer said it wasn\'t a clap ('+stat.ml_rejected+' rejected so far) — not toggled.';
   else if(stat.last_single_ago!=null&&stat.last_single_ago<4)h.textContent='Heard one clap '+stat.last_single_ago+'s ago — clap twice quickly to toggle.';
-  else h.textContent='Clap — the bar should jump near the top. '+(stat.doubles||0)+' double‑claps so far.'+
-    (stat.glitches?' ('+stat.glitches+' hardware glitch spikes were correctly ignored.)':'');}
+  else{let extra=[];
+    if(stat.glitches)extra.push(stat.glitches+' hardware glitch spikes');
+    if(stat.mode==='smart'){
+      if(!stat.ml_available)extra.push('recognizer model unavailable — falling back to instant toggle');
+      if(stat.ml_rejected)extra.push(stat.ml_rejected+' non-clap sounds correctly ignored');
+      if(stat.ml_unavailable)extra.push(stat.ml_unavailable+' where recognition failed (toggled anyway)');
+    }
+    h.textContent='Clap — the bar should jump near the top. '+(stat.doubles||0)+' double‑claps so far.'+
+      (extra.length?' ('+extra.join(', ')+'.)':'');}}
 async function openClap(){openView('clapview');const st=document.getElementById('clStatus');st.textContent='';
   if(!clSetters.clSens){clSetters={clSens:clBar('clSens'),clBoost:clBar('clBoost'),clDbl:clBar('clDbl'),clCool:clBar('clCool')};}
   try{const c=await (await fetch('/api/clap')).json();
-    clVals.enabled=c.enabled;clVals.after_sunset=c.after_sunset;clVals.pre_sunset_min=c.pre_sunset_min||0;
+    clVals.enabled=c.enabled;clVals.mode=c.mode||'smart';clVals.after_sunset=c.after_sunset;clVals.pre_sunset_min=c.pre_sunset_min||0;
     clVals.sensitivity=c.sensitivity;clVals.boost=c.boost;
     clVals.dbl_max=c.dbl_max;clVals.cooldown=c.cooldown;clVals.entities=c.entities||[];clSwitches=c.switches||[];
     clVals._night=c.sun_night;clVals._set=c.sun_set;clVals._rise=c.sun_rise;
     clSetters.clSens(c.sensitivity,false);clSetters.clBoost(c.boost,false);clSetters.clDbl(c.dbl_max,false);clSetters.clCool(c.cooldown,false);
-    clMark();clSunMark();clPreMark();clSunNote();clRenderSwitches();clMeter(c.stat);
+    clMark();clModeMark();clSunMark();clPreMark();clSunNote();clRenderSwitches();clMeter(c.stat);
     if(!c.has_token)st.textContent='⚠ No Home Assistant token configured.';
     else if(!c.switches.length)st.textContent='⚠ Could not reach Home Assistant to list switches.';
   }catch(e){st.textContent='Could not load clap settings.';}
