@@ -198,6 +198,9 @@ class Store:
 
 STORE = Store(CFG["keep"])
 
+# set by main(); lets the HTTP thread re-open a pairing window
+STATE = {"pair_until": 0.0, "set_discoverable": None}
+
 
 # --- BlueZ helpers --------------------------------------------------------
 def get_managed_objects(bus):
@@ -588,18 +591,71 @@ def main():
 
     client.scan_existing()
 
-    # keep the adapter advertising/pairable even if something resets it
+    # iOS drops the link when it has nothing to say and does not always come
+    # back on its own, so we page bonded phones ourselves rather than waiting.
+    reconnect_fail = {}
+
+    def try_reconnect():
+        if client.device_path is not None:
+            return
+        for path, ifaces in get_managed_objects(bus).items():
+            dev = ifaces.get(DEVICE_IFACE)
+            if not dev or not str(path).startswith(str(adapter_path) + "/"):
+                continue
+            if not dev.get("Paired") or dev.get("Connected"):
+                continue
+            p = str(path)
+
+            def ok(p=p):
+                reconnect_fail.pop(p, None)
+                log("reconnected %s" % p)
+
+            def err(exc, p=p):
+                n = reconnect_fail.get(p, 0) + 1
+                reconnect_fail[p] = n
+                # phone out of range is the normal case - do not spam the log
+                if n <= 2 or n % 20 == 0:
+                    log("reconnect to %s failed (%d): %s" % (p, n, exc))
+
+            dbus.Interface(bus.get_object(BUS_NAME, p), DEVICE_IFACE).Connect(
+                reply_handler=ok, error_handler=err, timeout=25)
+
+    def set_discoverable(on):
+        """Classic discoverability is only needed to GET paired - iOS will not
+        list a pure-BLE peripheral in Settings, which is why BR/EDR has to be
+        available at all. We drop out of inquiry scan only while a phone is
+        actually linked: this Pi's address is the one the bedroom Pi spoofs for
+        the WeatherThing, so the less it answers over classic, the better. Page
+        scan stays on (Connectable) because iOS still needs a route back.
+
+        Gating on "linked" rather than "has a bond" is deliberate. Gating on
+        the bond locked the user out: disconnecting the phone left the Pi
+        invisible with no way to re-pair from the phone alone."""
+        try:
+            if bool(props.Get(ADAPTER_IFACE, "Discoverable")) != on:
+                props.Set(ADAPTER_IFACE, "Discoverable", dbus.Boolean(on))
+                log("classic discoverable -> %s" % on)
+        except Exception as exc:                            # noqa: BLE001
+            log("set_discoverable: %s" % exc)
+
+    STATE["set_discoverable"] = set_discoverable
+
     def keepalive():
         try:
-            if not bool(props.Get(ADAPTER_IFACE, "Discoverable")):
-                props.Set(ADAPTER_IFACE, "Discoverable", dbus.Boolean(True))
+            if time.time() < STATE["pair_until"]:
+                set_discoverable(True)
+            else:
+                set_discoverable(client.device_path is None)
             if not bool(props.Get(ADAPTER_IFACE, "Pairable")):
                 props.Set(ADAPTER_IFACE, "Pairable", dbus.Boolean(True))
             if client.device_path is None:
                 client.scan_existing()
+                try_reconnect()
         except Exception as exc:                            # noqa: BLE001
             log("keepalive: %s" % exc)
         return True
+
+    keepalive()
 
     GLib.timeout_add_seconds(30, keepalive)
 
@@ -664,6 +720,21 @@ class Handler(BaseHTTPRequestHandler):
             STORE.add(item)
             log("injected test notification uid=%d" % item["uid"])
             self._send({"ok": True, "injected": item})
+        elif path == "/api/pair":
+            # re-open classic discoverability so a phone can be (re-)paired
+            mins = 5
+            try:
+                from urllib.parse import parse_qs
+                mins = int(parse_qs(parts[1] if len(parts) > 1 else "")
+                           .get("mins", ["5"])[0])
+            except Exception:                               # noqa: BLE001
+                pass
+            mins = max(1, min(mins, 30))
+            STATE["pair_until"] = time.time() + mins * 60
+            if STATE["set_discoverable"]:
+                STATE["set_discoverable"](True)
+            log("pairing window opened for %d min" % mins)
+            self._send({"ok": True, "discoverable_for_minutes": mins})
         elif path == "/api/test/clear":
             for i in STORE.snapshot(50)["items"]:
                 if i.get("test"):
