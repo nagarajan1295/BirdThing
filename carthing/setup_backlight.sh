@@ -14,12 +14,16 @@ MAX=255
 cur=-1
 last=-1
 
-# nocturned (the Nocturne UI daemon) runs its OWN auto-dim ramp that continuously pulls the
-# backlight toward dark, fighting our writes -- THIS is the long-standing screen flicker. We run
-# our own Chromium kiosk (not nocturne-ui) and control brightness here, so stop nocturned once.
-# It starts again on the next boot (before this script), then we stop it again -- BT/display are
-# unaffected (the BT PAN link is bt-pan.sh, the display is Chromium; both run without nocturned).
-supervisorctl stop nocturned >/dev/null 2>&1
+# nocturned's "auto-dim ramp" is actually its NATIVE AUTO-BRIGHTNESS reading the tmd2772 ambient
+# light sensor (iio:device0) -- turn a room light on and the panel brightens. Killing it is only
+# right where that sensor is DEAD (the BirdThing unit: TMD2772 gone at silicon, so nocturned just
+# ramps to dark forever and fights our writes = the flicker). On a unit with a WORKING sensor,
+# stopping nocturned throws away the good ambient behaviour, so this is OPT-IN per device:
+# `touch /etc/birdthing/kill-nocturned` (persist via `mount -o remount,rw /`) to enable it.
+# Check first: `cat /sys/bus/iio/devices/iio:device0/in_illuminance0_input` should track the room.
+# NOTE: when nocturned owns the panel it stops this `backlight` program itself -- that's expected,
+# not a fault to "fix"; the two must never both drive aml-bl or they tug-of-war (= flicker).
+[ -f /etc/birdthing/kill-nocturned ] && supervisorctl stop nocturned >/dev/null 2>&1
 clampw(){ w=$1; [ "$w" -lt 3 ] && w=3; [ "$w" -gt "$MAX" ] && w=$MAX; echo "$w"; }
 write_if_changed(){ [ "$cur" -ne "$last" ] && { echo "$cur" > "$BACKLIGHT"; last=$cur; }; }
 while :; do
