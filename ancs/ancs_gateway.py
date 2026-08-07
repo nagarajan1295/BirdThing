@@ -229,6 +229,12 @@ class Advertisement(dbus.service.Object):
                 "LocalName": dbus.String(self.local_name),
                 "Includes": dbus.Array(["tx-power"], signature="s"),
                 "Discoverable": dbus.Boolean(True),
+                # BlueZ otherwise defaults to a 1280ms interval, which is slow
+                # enough that iOS's Settings scan can take a very long time to
+                # notice us. ~100-150ms is the usual pairing-friendly range.
+                # Both properties need bluetoothd's Experimental mode.
+                "MinInterval": dbus.UInt32(100),
+                "MaxInterval": dbus.UInt32(150),
             }
         }
 
