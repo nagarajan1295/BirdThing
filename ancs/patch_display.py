@@ -5,11 +5,17 @@ Inject the ANCS notification toast into one of the house displays.
 Idempotent: re-running replaces the previously injected block rather than
 stacking copies. Always writes a timestamped .bak first.
 
-  patch_display.py <html-file> <widget-file> <ancs-url> [theme]
+  patch_display.py <html-file> <widget-file> <ancs-url> [key=value ...]
 
-[theme] is 'light' for host pages that are light-themed but don't use the
-body.light convention (the bedroom kiosk); omit it otherwise.
+Recognised keys (all optional):
+  theme=light      host page is light but has no body.light (bedroom kiosk)
+  style=full       whole-screen notification instead of a top banner
+  fs=<css-length>  base font size; pass the host's own scale so the
+                   notification matches that screen's typography, e.g.
+                   'calc(17px * var(--ts,1))'
+  hold_ms / call_hold_ms / poll_ms
 """
+import json
 import os
 import shutil
 import sys
@@ -20,20 +26,35 @@ END = "<!-- ANCS-NOTIFY-END -->"
 
 
 def main():
-    if len(sys.argv) not in (4, 5):
+    if len(sys.argv) < 4:
         print(__doc__)
         return 2
     html_path, widget_path, ancs_url = sys.argv[1], sys.argv[2], sys.argv[3]
-    theme = sys.argv[4] if len(sys.argv) == 5 else ""
+
+    keys = {"theme": "ANCS_THEME", "style": "ANCS_STYLE", "fs": "ANCS_FS",
+            "hold_ms": "ANCS_HOLD_MS", "call_hold_ms": "ANCS_CALL_HOLD_MS",
+            "poll_ms": "ANCS_POLL_MS"}
+    opts = {}
+    for arg in sys.argv[4:]:
+        if "=" not in arg:
+            print("ERROR: expected key=value, got %r" % arg)
+            return 2
+        k, v = arg.split("=", 1)
+        if k not in keys:
+            print("ERROR: unknown key %r (known: %s)"
+                  % (k, ", ".join(sorted(keys))))
+            return 2
+        opts[keys[k]] = v
 
     with open(html_path, encoding="utf-8") as fh:
         html = fh.read()
     with open(widget_path, encoding="utf-8") as fh:
         widget = fh.read()
 
-    cfg = "window.ANCS_URL=%r;" % ancs_url
-    if theme:
-        cfg += "window.ANCS_THEME=%r;" % theme
+    cfg = "window.ANCS_URL=%s;" % json.dumps(ancs_url)
+    for name, val in sorted(opts.items()):
+        cfg += "window.%s=%s;" % (
+            name, val if val.isdigit() else json.dumps(val))
     block = "%s\n<script>%s</script>\n%s\n%s\n" % (
         BEGIN, cfg, widget.strip(), END)
 
