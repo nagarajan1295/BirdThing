@@ -58,6 +58,14 @@ case "$(settings)" in
     *ssp*) ;;
     *) need="$need ssp" ;;
 esac
+# CONNECTABLE = page scan. Without it the iPhone cannot initiate a
+# reconnection and the user has to connect by hand every time. It is NOT
+# implied by the others and has been silently dropped before (turning the
+# adapter non-discoverable took it down too), so assert it explicitly.
+case "$(settings)" in
+    *connectable*) ;;
+    *) need="$need connectable" ;;
+esac
 
 if [ -n "$need" ]; then
     log "asserting:$need"
@@ -71,8 +79,11 @@ if [ -n "$need" ]; then
 fi
 
 log "$(settings)"
-case "$(settings)" in
-    *ssp*br/edr*|*br/edr*ssp*) log "ok - discoverable+pairable by iOS" ;;
-    *) log "WARNING: br/edr and/or ssp missing - the iPhone will not pair" ;;
-esac
+s="$(settings)"
+for flag in br/edr ssp connectable; do
+    case "$s" in
+        *"$flag"*) ;;
+        *) log "WARNING: '$flag' missing - iPhone pairing/auto-reconnect will fail" ;;
+    esac
+done
 log "done"

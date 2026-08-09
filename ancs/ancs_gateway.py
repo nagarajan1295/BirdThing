@@ -623,14 +623,19 @@ def main():
     def set_discoverable(on):
         """Classic discoverability is only needed to GET paired - iOS will not
         list a pure-BLE peripheral in Settings, which is why BR/EDR has to be
-        available at all. We drop out of inquiry scan only while a phone is
-        actually linked: this Pi's address is the one the bedroom Pi spoofs for
-        the WeatherThing, so the less it answers over classic, the better. Page
-        scan stays on (Connectable) because iOS still needs a route back.
+        available at all.
 
-        Gating on "linked" rather than "has a bond" is deliberate. Gating on
-        the bond locked the user out: disconnecting the phone left the Pi
-        invisible with no way to re-pair from the phone alone."""
+        DEFAULT IS ALWAYS-ON, and that is deliberate. Two earlier attempts to
+        be clever here both broke the phone:
+          - gating on "has a bond" left the Pi invisible after a disconnect,
+            with no way to re-pair from the phone alone;
+          - gating on "is linked" turned out to drop the controller's
+            CONNECTABLE flag with it, killing page scan - so iOS could not
+            initiate a reconnection at all and the user had to connect by hand
+            every single time.
+        Staying discoverable costs a little more exposure on the address the
+        bedroom Pi spoofs, which is already mitigated (no Car Thing link key
+        here, no NAP service). Reliable auto-reconnect is worth more."""
         try:
             if bool(props.Get(ADAPTER_IFACE, "Discoverable")) != on:
                 props.Set(ADAPTER_IFACE, "Discoverable", dbus.Boolean(on))
@@ -642,10 +647,9 @@ def main():
 
     def keepalive():
         try:
-            if time.time() < STATE["pair_until"]:
-                set_discoverable(True)
-            else:
-                set_discoverable(client.device_path is None)
+            set_discoverable(True if CFG.get("always_discoverable", True)
+                             else (time.time() < STATE["pair_until"]
+                                   or client.device_path is None))
             if not bool(props.Get(ADAPTER_IFACE, "Pairable")):
                 props.Set(ADAPTER_IFACE, "Pairable", dbus.Boolean(True))
             if client.device_path is None:
