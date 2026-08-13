@@ -48,6 +48,11 @@ DATA_SOURCE = "22eac6e9-24d6-4bb5-be44-b36ace7c7bfb"
 ADV_PATH = "/org/birdthing/ancs/adv0"
 AGENT_PATH = "/org/birdthing/ancs/agent"
 
+# GATT subscribe can lose a race with a flapping link; retry rather than sit
+# there claiming to be linked with nothing subscribed
+ATTACH_RETRY_S = 1.5
+ATTACH_MAX_TRIES = 5
+
 # --- ANCS constants -------------------------------------------------------
 EVT_ADDED, EVT_MODIFIED, EVT_REMOVED = 0, 1, 2
 
@@ -173,8 +178,24 @@ class Store:
             self.device = device
             self.since = time.time()
             if not linked:
+                # ONLY calls get cancelled by a dropped link.
+                #
+                # This used to deactivate EVERY stored notification, and that
+                # silently ate real notifications: the displays refuse to toast
+                # anything with active=false and dismiss it if it is already up.
+                # At the edge of BLE range the phone flaps every ~20s, so each
+                # notification was killed within seconds of arriving - the
+                # gateway logged the message correctly and no screen ever showed
+                # it. 'active' means "the phone is still showing this", which is
+                # driven by ANCS EVT_REMOVED; losing the radio link tells us
+                # nothing about that, so it must not clear the flag.
+                #
+                # An incoming CALL is the exception: its banner is meant to stay
+                # up until the phone says the call ended, so if the phone
+                # vanishes mid-ring it would otherwise hang on screen forever.
                 for item in self._items:
-                    item["active"] = False
+                    if item.get("call"):
+                        item["active"] = False
 
     def snapshot(self, limit=20):
         now = time.time()
@@ -324,6 +345,7 @@ class AncsClient:
         self.ds_buf = bytearray()
         self.pending = deque()    # notification uids awaiting attributes
         self.inflight = None
+        self._attach_tries = {}   # device path -> consecutive failed subscribes
 
     # -- connection lifecycle --
     def scan_existing(self):
@@ -375,15 +397,42 @@ class AncsClient:
             self.cp = None
             log("no control point - titles/bodies will be unavailable")
 
-        # data source first: it must be listening before any request goes out
+        # Data source first: it must be listening before any request goes out.
+        #
+        # These subscriptions are what actually deliver notifications, and they
+        # DO fail in practice - a flapping link produces 'ATT error: 0x0e' and
+        # 'org.bluez.Error.InProgress' (both seen live). The old code merely
+        # logged that and declared the phone linked anyway, which is the worst
+        # possible outcome: /healthz says linked:true, the displays sit there
+        # polling, and nothing is subscribed so no notification can ever arrive.
+        # Treat a failed subscribe as "not attached" and retry instead.
+        failed = []
         for uuid in (DATA_SOURCE, NOTIFICATION_SOURCE):
             try:
                 dbus.Interface(self.bus.get_object(BUS_NAME, chrcs[uuid]),
                                GATT_CHRC_IFACE).StartNotify()
             except dbus.exceptions.DBusException as exc:
-                if "Already" not in str(exc):
-                    log("StartNotify failed for %s: %s" % (uuid, exc))
+                if "Already" in str(exc):
+                    continue            # already subscribed is success
+                failed.append(uuid)
+                log("StartNotify failed for %s: %s" % (uuid, exc))
 
+        if failed:
+            tries = self._attach_tries.get(device_path, 0) + 1
+            self._attach_tries[device_path] = tries
+            self.device_path = None     # not attached - do not claim linked
+            self.cp = None
+            if tries <= ATTACH_MAX_TRIES:
+                log("subscribe incomplete (%d/%d) - retrying in %.1fs"
+                    % (tries, ATTACH_MAX_TRIES, ATTACH_RETRY_S))
+                GLib.timeout_add(int(ATTACH_RETRY_S * 1000),
+                                 lambda p=device_path: (self.try_attach(p), False)[1])
+            else:
+                log("subscribe failed %d times on %s - giving up until the "
+                    "phone reconnects" % (tries, device_path))
+            return
+
+        self._attach_tries.pop(device_path, None)
         name = "phone"
         try:
             props = dbus.Interface(
@@ -395,6 +444,9 @@ class AncsClient:
         log("linked to %s" % name)
 
     def detach(self, device_path):
+        # a genuine disconnect resets the subscribe budget even if we were
+        # mid-retry (device_path is None then, so the guard below would skip it)
+        self._attach_tries.pop(device_path, None)
         if device_path != self.device_path:
             return
         log("phone disconnected")
@@ -754,6 +806,21 @@ def main():
                     classic_only = True
             DIAG["bonded"] = bonded
             DIAG["classic_connected"] = classic_only
+
+            # RECONCILE: a PropertiesChanged "Connected: false" can be missed
+            # (bus hiccup, or the drop happening between scan_existing() and
+            # the signal handler being wired at startup). Without this the
+            # gateway keeps reporting linked:true against a phone that is gone,
+            # so /healthz lies and every display sits polling a dead link.
+            dp = client.device_path
+            if dp is not None:
+                still = next((b for b in bonded if b["path"] == str(dp)), None)
+                if still is None or not still["connected"]:
+                    log("device %s is no longer connected - detaching" % dp)
+                    client.detach(dp)
+            elif STORE.linked:
+                # attached state already gone but the flag survived
+                STORE.set_link(False)
         except Exception as exc:                            # noqa: BLE001
             log("refresh_diag: %s" % exc)
 
