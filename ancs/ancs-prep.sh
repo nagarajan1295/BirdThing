@@ -69,6 +69,27 @@ if [ -n "$need" ]; then
     sleep 2
 fi
 
+# CLASS OF DEVICE - this decides whether iOS offers "Share System Notifications"
+#
+# A desktop host advertises itself as Computer/Laptop (the mini booted as
+# 0x00010c). iOS does not offer notification sharing to a device it classifies
+# as a COMPUTER - it treats it as a peer machine rather than an accessory, so
+# the toggle simply never appears under the (i) and ANCS can never be granted.
+# The BirdThing Pi, which worked, presented 0x400000 = Miscellaneous device
+# with the Telephony service class. Match that exactly.
+#
+# main.conf's `Class` only carries the device-class half; the service-class bits
+# have to be written over HCI, and bluetoothd resets them on restart - so assert
+# the full 24-bit value here on every boot.
+WANT_CLASS="${WANT_CLASS:-0x400000}"
+cur_class="$(hciconfig -a "$ADAPTER" 2>/dev/null | sed -n 's/.*Class: \(0x[0-9a-fA-F]*\).*/\1/p' | head -1)"
+if [ "$cur_class" != "$WANT_CLASS" ]; then
+    log "class of device $cur_class -> $WANT_CLASS"
+    hciconfig "$ADAPTER" class "$WANT_CLASS" 2>/dev/null
+    sleep 1
+fi
+log "class: $(hciconfig -a "$ADAPTER" 2>/dev/null | grep -m1 'Class:')"
+
 log "$(settings)"
 s="$(settings)"
 for flag in br/edr ssp connectable bondable le; do
