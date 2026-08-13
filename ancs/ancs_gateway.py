@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-ANCS gateway - Apple Notification Center Service consumer for the BirdThing Pi.
+ANCS gateway - Apple Notification Center Service consumer.
 
-The Pi advertises itself as a BLE peripheral soliciting Apple's ANCS service.
-Once the iPhone pairs and grants notification access, the Pi becomes a GATT
+Runs on the Mac mini (Sentry host), whose Broadcom BT radio is stronger and
+completely unused; it replaces the BirdThing Pi as the phone-facing end. The
+host advertises itself as a BLE peripheral soliciting Apple's ANCS service.
+Once the iPhone pairs and grants notification access, the host becomes a GATT
 client against the phone's ANCS service and receives every notification the
 phone shows - including incoming calls and messages, with sender and body.
 
@@ -100,7 +102,7 @@ CONFIG_PATH = "/etc/ancs-gateway.json"
 DEFAULT_CONFIG = {
     "port": 8099,
     "adapter": "hci0",
-    "local_name": "BirdThing",
+    "local_name": "BirdThing Hub",
     "keep": 40,            # ring buffer size
     "expire_sec": 240,     # how long a notification stays "fresh" for toasts
     "redact_body": False,  # True = send sender only, never the message text
@@ -201,6 +203,23 @@ STORE = Store(CFG["keep"])
 # set by main(); lets the HTTP thread re-open a pairing window
 STATE = {"pair_until": 0.0, "set_discoverable": None}
 
+# live diagnostics, surfaced by /api/status. "hit or miss" is impossible to
+# debug from the outside without these, so they are cheap and always on.
+DIAG = {
+    "adapter": "",
+    "address": "",
+    "advertising": False,       # our ANCS solicitation is registered with bluez
+    "adv_registered_at": 0.0,
+    "adv_failures": 0,
+    "adv_last_error": "",
+    "bonded": [],               # [{path, alias, connected, services_resolved, rssi}]
+    "last_reconnect_error": "",
+    "last_reconnect_at": 0.0,
+    "classic_connected": False, # phone attached over BR/EDR but no ANCS = the
+                                # classic symptom of "connected but no toasts"
+    "started": time.time(),
+}
+
 
 # --- BlueZ helpers --------------------------------------------------------
 def get_managed_objects(bus):
@@ -222,6 +241,7 @@ class Advertisement(dbus.service.Object):
     def __init__(self, bus, path, local_name):
         self.path = path
         self.local_name = local_name
+        self.on_released = None      # set by main()'s advertising watchdog
         dbus.service.Object.__init__(self, bus, path)
 
     def get_properties(self):
@@ -250,6 +270,8 @@ class Advertisement(dbus.service.Object):
     @dbus.service.method("org.bluez.LEAdvertisement1", in_signature="", out_signature="")
     def Release(self):
         log("advertisement released by bluez")
+        if self.on_released:
+            self.on_released()
 
 
 class Agent(dbus.service.Object):
@@ -540,15 +562,8 @@ def main():
 
     adv = Advertisement(bus, ADV_PATH, CFG["local_name"])
     adv_mgr = dbus.Interface(bus.get_object(BUS_NAME, adapter_path), LE_ADV_MGR_IFACE)
-
-    def adv_ok():
-        log("advertising as %r, soliciting ANCS" % CFG["local_name"])
-
-    def adv_err(exc):
-        log("advertise FAILED: %s" % exc)
-
-    adv_mgr.RegisterAdvertisement(adv.path, {},
-                                  reply_handler=adv_ok, error_handler=adv_err)
+    # registration itself is done by ensure_advertising() below, so the one
+    # code path both starts and repairs the advertisement
 
     client = AncsClient(bus, adapter_path)
 
@@ -591,13 +606,30 @@ def main():
 
     client.scan_existing()
 
-    # iOS drops the link when it has nothing to say and does not always come
-    # back on its own, so we page bonded phones ourselves rather than waiting.
+    # RECONNECT: iOS is the side that has to re-establish the ANCS link.
+    #
+    # The Pi version paged bonded phones itself every 30s with Device1.Connect()
+    # and that is why it never came back on its own. For a DUAL-mode bond (which
+    # is what pairing through iOS Settings always produces, via CTKD) BlueZ
+    # routes Connect() over BR/EDR, and the iPhone exposes no classic profile
+    # this host wants - so every single attempt died with
+    #   org.bluez.Error.Failed: br-connection-profile-unavailable
+    # (9600+ consecutive failures observed on the Pi). BlueZ does NOT fall back
+    # to LE after that, so the transport ANCS actually needs was never tried.
+    #
+    # The correct model is the one every ANCS accessory uses: keep a connectable
+    # LE advertisement soliciting ANCS on the air, and let iOS reconnect to it.
+    # That is what ADVERTISING WATCHDOG below guarantees. The direct Connect()
+    # is kept only as a low-rate fallback (it does occasionally win once the
+    # phone has something to offer) - rate-limited so it cannot flood the log
+    # or keep the controller busy paging a phone that is out of range.
     reconnect_fail = {}
+    RECONNECT_MIN_INTERVAL = 300.0      # seconds between attempts per device
 
     def try_reconnect():
         if client.device_path is not None:
             return
+        now = time.time()
         for path, ifaces in get_managed_objects(bus).items():
             dev = ifaces.get(DEVICE_IFACE)
             if not dev or not str(path).startswith(str(adapter_path) + "/"):
@@ -605,20 +637,71 @@ def main():
             if not dev.get("Paired") or dev.get("Connected"):
                 continue
             p = str(path)
+            last = reconnect_fail.get(p, {}).get("at", 0.0)
+            if now - last < RECONNECT_MIN_INTERVAL:
+                continue
+            reconnect_fail.setdefault(p, {})["at"] = now
 
             def ok(p=p):
                 reconnect_fail.pop(p, None)
+                DIAG["last_reconnect_error"] = ""
                 log("reconnected %s" % p)
 
             def err(exc, p=p):
-                n = reconnect_fail.get(p, 0) + 1
-                reconnect_fail[p] = n
-                # phone out of range is the normal case - do not spam the log
+                d = reconnect_fail.setdefault(p, {})
+                n = d.get("n", 0) + 1
+                d["n"] = n
+                DIAG["last_reconnect_error"] = str(exc)
+                DIAG["last_reconnect_at"] = time.time()
+                # out of range / no classic profile is the normal case here
                 if n <= 2 or n % 20 == 0:
                     log("reconnect to %s failed (%d): %s" % (p, n, exc))
 
             dbus.Interface(bus.get_object(BUS_NAME, p), DEVICE_IFACE).Connect(
                 reply_handler=ok, error_handler=err, timeout=25)
+
+    # --- ADVERTISING WATCHDOG ---------------------------------------------
+    # Everything above depends on the ANCS solicitation actually being on the
+    # air. bluetoothd releases the advertisement on its own in several cases
+    # (adapter power cycle, a Release() from the daemon, an adapter reset), and
+    # when that happens the phone simply has nothing to reconnect TO - which
+    # looks exactly like "it's hit or miss". So track registration state and
+    # put it back whenever it lapses.
+    adv_state = {"registered": False, "busy": False, "obj": adv}
+
+    def _adv_ok():
+        adv_state["registered"] = True
+        adv_state["busy"] = False
+        DIAG["advertising"] = True
+        DIAG["adv_registered_at"] = time.time()
+        DIAG["adv_last_error"] = ""
+        log("advertising as %r, soliciting ANCS" % CFG["local_name"])
+
+    def _adv_err(exc):
+        adv_state["registered"] = False
+        adv_state["busy"] = False
+        DIAG["advertising"] = False
+        DIAG["adv_failures"] += 1
+        DIAG["adv_last_error"] = str(exc)
+        log("advertise FAILED: %s" % exc)
+
+    def ensure_advertising():
+        if adv_state["registered"] or adv_state["busy"]:
+            return
+        adv_state["busy"] = True
+        try:
+            adv_mgr.RegisterAdvertisement(adv.path, {},
+                                          reply_handler=_adv_ok,
+                                          error_handler=_adv_err)
+        except Exception as exc:                            # noqa: BLE001
+            _adv_err(exc)
+
+    def on_adv_released():
+        adv_state["registered"] = False
+        DIAG["advertising"] = False
+        log("advertisement was released - will re-register")
+
+    adv.on_released = on_adv_released
 
     def set_discoverable(on):
         """Classic discoverability is only needed to GET paired - iOS will not
@@ -645,8 +728,38 @@ def main():
 
     STATE["set_discoverable"] = set_discoverable
 
+    def refresh_diag():
+        """Snapshot what the radio is actually doing, for /api/status."""
+        try:
+            DIAG["adapter"] = str(adapter_path)
+            DIAG["address"] = str(props.Get(ADAPTER_IFACE, "Address"))
+            bonded, classic_only = [], False
+            for path, ifaces in get_managed_objects(bus).items():
+                dev = ifaces.get(DEVICE_IFACE)
+                if not dev or not str(path).startswith(str(adapter_path) + "/"):
+                    continue
+                if not dev.get("Paired"):
+                    continue
+                entry = {
+                    "path": str(path),
+                    "alias": str(dev.get("Alias", "")),
+                    "connected": bool(dev.get("Connected")),
+                    "services_resolved": bool(dev.get("ServicesResolved")),
+                    "rssi": int(dev["RSSI"]) if "RSSI" in dev else None,
+                }
+                bonded.append(entry)
+                # connected, but the ANCS GATT client never attached: this is
+                # the exact "I connect it by hand and still get nothing" case
+                if entry["connected"] and client.device_path is None:
+                    classic_only = True
+            DIAG["bonded"] = bonded
+            DIAG["classic_connected"] = classic_only
+        except Exception as exc:                            # noqa: BLE001
+            log("refresh_diag: %s" % exc)
+
     def keepalive():
         try:
+            ensure_advertising()
             set_discoverable(True if CFG.get("always_discoverable", True)
                              else (time.time() < STATE["pair_until"]
                                    or client.device_path is None))
@@ -655,6 +768,7 @@ def main():
             if client.device_path is None:
                 client.scan_existing()
                 try_reconnect()
+            refresh_diag()
         except Exception as exc:                            # noqa: BLE001
             log("keepalive: %s" % exc)
         return True
@@ -700,6 +814,32 @@ class Handler(BaseHTTPRequestHandler):
             self._send(STORE.snapshot())
         elif path == "/healthz":
             self._send({"ok": True, "linked": STORE.linked})
+        elif path == "/api/status":
+            snap = STORE.snapshot(1)
+            diag = dict(DIAG)
+            diag["linked"] = snap["linked"]
+            diag["device"] = snap["device"]
+            diag["uptime_s"] = round(time.time() - DIAG["started"], 1)
+            diag["local_name"] = CFG["local_name"]
+            # a plain-English read of the state, so "is it working?" does not
+            # require interpreting six booleans
+            if snap["linked"]:
+                diag["verdict"] = "linked - notifications will arrive"
+            elif diag["classic_connected"]:
+                diag["verdict"] = ("phone is connected but ANCS is not attached: "
+                                   "notification access was not granted, or the "
+                                   "link is classic-only. Re-pair and allow "
+                                   "'Share System Notifications'.")
+            elif not diag["advertising"]:
+                diag["verdict"] = ("NOT advertising - the phone has nothing to "
+                                   "reconnect to. See adv_last_error.")
+            elif diag["bonded"]:
+                diag["verdict"] = ("advertising and bonded, waiting for the "
+                                   "phone to come back in range")
+            else:
+                diag["verdict"] = ("advertising, no phone bonded yet - pair "
+                                   "from iOS Settings > Bluetooth")
+            self._send(diag)
         elif path == "/api/test":
             # inject a synthetic notification - lets the display chain be
             # verified end to end without waiting for a real call or text

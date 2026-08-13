@@ -1,24 +1,19 @@
 #!/bin/bash
-# Prepare hci0 on the BirdThing Pi for ANCS, and assert it on every boot.
+# Prepare hci0 on the Mac mini for ANCS, and assert it on every boot.
+#
+# This host replaced the BirdThing Pi as the phone-facing end: its Broadcom
+# BCM20702 (Apple 05ac:8289, HCI 4.0) is a dedicated USB radio with the Mac's
+# own antenna, rather than the Pi's SoC radio sharing a PCB antenna with WiFi,
+# and it starts with ZERO existing bonds - so none of the Pi's address-clash
+# mitigations (it spoofs the bedroom Pi's BD address) apply here at all.
 #
 # WHY DUAL MODE, not LE-only:
-#   ANCS itself is pure BLE, and LE-only would neatly avoid the address clash
-#   described below - but iOS will NOT list a pure-BLE peripheral in
-#   Settings > Bluetooth, no matter how correct its ANCS solicitation is.
-#   (Verified on air: AD type 0x15 with the real ANCS UUID, 100ms interval,
-#   connectable, named - and the iPhone still showed nothing.) Classic
-#   Bluetooth has to be available for the phone to discover and keep this
-#   accessory. Once connected, the ANCS link itself rides LE.
-#
-# THE ADDRESS CLASH (live, mitigated - not eliminated):
-#   This Pi's BD address DC:A6:32:62:53:01 is the address the BEDROOM Pi
-#   spoofs to serve the WeatherThing Car Thing over BT PAN. With classic on,
-#   this Pi answers paging on that address too. Mitigations:
-#     - the Car Thing's stale bond has been REMOVED from this Pi, so it holds
-#       no link key and a CT connection attempt cannot authenticate
-#     - this Pi runs no NAP service (birdthing-btnap stays disabled)
-#     - the gateway drops out of inquiry scan while a phone is linked
-#   Do NOT re-enable birdthing-btnap or re-pair the Car Thing to this Pi.
+#   ANCS itself is pure BLE, but iOS will not list a pure-BLE peripheral in
+#   Settings > Bluetooth (verified on air on the Pi: correct AD type 0x15, real
+#   ANCS UUID, 100ms interval, connectable, named - the iPhone showed nothing).
+#   Classic has to be available for the phone to DISCOVER the accessory. Once
+#   connected, the ANCS link itself rides LE, and pairing over classic derives
+#   the LE keys via CTKD.
 #
 # btmgmt GOTCHA: it silently ignores its command when it has no tty (exits 0
 # doing nothing; under systemd it blocks until the unit times out). Every
@@ -28,7 +23,6 @@ ADAPTER="${ADAPTER:-hci0}"
 log() { echo "[ancs-prep] $*"; }
 mgmt() { script -qec "btmgmt --index $ADAPTER $*" /dev/null >/dev/null 2>&1; }
 
-# clear the rfkill soft-block left over from when Bluetooth was mothballed here
 for rf in /sys/class/rfkill/rfkill*; do
     [ -e "$rf/type" ] || continue
     [ "$(cat "$rf/type")" = "bluetooth" ] || continue
@@ -45,27 +39,23 @@ done
 settings() { script -qec "btmgmt --index $ADAPTER info" /dev/null 2>/dev/null \
              | grep -m1 'current settings:'; }
 
-# Assert BR/EDR + SSP. Both are needed and neither is reliably restored:
-# ControllerMode=dual in main.conf is overridden by whatever the kernel last
-# had, and - the subtle one - power-cycling bredr CLEARS ssp. Without ssp the
-# adapter only offers legacy PIN pairing and iOS will not pair with it at all.
+# Assert BR/EDR + SSP + CONNECTABLE + BONDABLE.
+#   ssp:         power-cycling bredr CLEARS it, and without it the adapter
+#                offers only legacy PIN pairing, which iOS refuses outright.
+#   connectable: this is page scan. Without it the iPhone cannot initiate a
+#                reconnection at all - the single most common cause of "I have
+#                to connect it by hand every time". It is NOT implied by
+#                br/edr or ssp and has been silently dropped before.
+#   bondable:    the mini boots without it (verified: current settings were
+#                just "powered ssp br/edr le secure-conn"), so pairing would
+#                fail before this script existed.
 need=""
-case "$(settings)" in
-    *br/edr*) ;;
-    *) need="bredr" ;;
-esac
-case "$(settings)" in
-    *ssp*) ;;
-    *) need="$need ssp" ;;
-esac
-# CONNECTABLE = page scan. Without it the iPhone cannot initiate a
-# reconnection and the user has to connect by hand every time. It is NOT
-# implied by the others and has been silently dropped before (turning the
-# adapter non-discoverable took it down too), so assert it explicitly.
-case "$(settings)" in
-    *connectable*) ;;
-    *) need="$need connectable" ;;
-esac
+for flag in br/edr ssp connectable bondable; do
+    case "$(settings)" in
+        *"$flag"*) ;;
+        *) need="$need $flag" ;;
+    esac
+done
 
 if [ -n "$need" ]; then
     log "asserting:$need"
@@ -74,13 +64,14 @@ if [ -n "$need" ]; then
     mgmt ssp on
     mgmt connectable on
     mgmt bondable on
+    mgmt le on
     mgmt power on
     sleep 2
 fi
 
 log "$(settings)"
 s="$(settings)"
-for flag in br/edr ssp connectable; do
+for flag in br/edr ssp connectable bondable le; do
     case "$s" in
         *"$flag"*) ;;
         *) log "WARNING: '$flag' missing - iPhone pairing/auto-reconnect will fail" ;;

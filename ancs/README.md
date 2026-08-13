@@ -7,49 +7,97 @@ bedroom weather kiosk. No app, no cloud, no extra hardware.
 ## How it works
 
 Apple publishes **ANCS** (Apple Notification Center Service), the BLE service
-fitness bands use. The BirdThing Pi advertises itself as a BLE peripheral
+fitness bands use. The gateway host advertises itself as a BLE peripheral
 *soliciting* ANCS; once the iPhone pairs and grants notification access, the
-Pi becomes a GATT client against the phone and receives every notification
+host becomes a GATT client against the phone and receives every notification
 the phone shows: app id, title (the caller/sender), the message body, and a
 distinct `IncomingCall` category.
 
 ```
-iPhone --BLE/ANCS--> BirdThing Pi (gateway :8099) --HTTP--> the three displays
+iPhone --BLE/ANCS--> Mac mini (gateway :8099) --HTTP--> the three displays
 ```
 
 One radio serves all three screens: the gateway holds notifications in memory
 and every display reads the same JSON.
 
-## Why the BirdThing Pi
+## The gateway moved to the Mac mini (2026-08-13)
 
-Its Bluetooth adapter was idle — Bluetooth had been disabled on this Pi so
-nothing would claim `DC:A6:32:62:53:01`, the address the **bedroom Pi spoofs**
-to serve the WeatherThing over BT PAN.
+It first ran on the **BirdThing Pi** and was unreliable there: the phone never
+reconnected on its own, and connecting it by hand produced no notifications.
+It now runs on the **Mac mini** (the Sentry host, `192.168.1.72`).
 
-The bedroom Pi's adapter is deliberately **not** touched — it is a
-serdev-attached BCM4345C0 with a long history of wedging, and the WeatherThing
-depends on it.
+Why the mini is the better host:
 
-## Dual mode is required (and the address clash that comes with it)
+- its Broadcom **BCM20702** (Apple `05ac:8289`, HCI 4.0) is a **dedicated USB
+  radio on the Mac's own antenna**, not the Pi's SoC radio sharing a PCB
+  antenna with WiFi
+- its Bluetooth was **completely unused — zero bonds**, so there is nothing to
+  collide with
+- **the address clash disappears entirely.** The Pi's BD address
+  `DC:A6:32:62:53:01` is the one the bedroom Pi *spoofs* to serve the
+  WeatherThing over BT PAN, so running classic Bluetooth on the Pi meant two
+  boxes answering paging on the same address — "mitigated, not eliminated".
+  The mini is `D4:DC:CD:F3:9B:89`, unrelated to anything.
 
-ANCS is pure BLE, so LE-only *ought* to work and would neatly dodge the
-address clash. **It does not.** iOS will not list a pure-BLE peripheral in
-Settings → Bluetooth however correct its solicitation is — verified on air:
-AD type `0x15` carrying the real ANCS UUID, 100 ms interval, connectable,
-named, and the iPhone showed nothing. Classic Bluetooth must be available for
-the phone to discover and keep the accessory. Once connected, the ANCS link
-itself rides LE (`hcitool con` shows `LE … AUTH ENCRYPT`).
+Bluetooth on the BirdThing Pi is now disabled again (`ancs-gateway`,
+`ancs-prep` and `bluetooth.service` all disabled, the iPhone bond removed),
+which restores the state the WeatherThing wants. The bedroom Pi's adapter is
+deliberately **not** touched — it is a serdev-attached BCM4345C0 with a long
+history of wedging, and the WeatherThing depends on it.
 
-So `ControllerMode = dual`, and the clash is **mitigated, not eliminated**:
+### Keep the phone from treating the mini as an audio device
 
-- the Car Thing's stale bond was **removed** from this Pi, so it holds no link
-  key and a Car Thing connection attempt cannot authenticate
-- this Pi runs **no NAP service** (`birdthing-btnap` stays disabled)
-- the gateway drops out of **inquiry scan while a phone is linked**
+The mini is a desktop, so it advertised A2DP, AVRCP and Hands-Free. An iPhone
+paired to a host offering **Hands-Free will route call audio to it** — into a
+headless kiosk in another room. Both halves have to be turned off, and they
+live in different places:
 
-Do not re-enable `birdthing-btnap` or re-pair the Car Thing to this Pi.
+- A2DP/AVRCP come from **bluetoothd plugins** →
+  `bluetoothd --noplugin=a2dp,avrcp,sap` (systemd drop-in)
+- HFP/HSP are registered by **WirePlumber** via `org.bluez.ProfileManager1`, so
+  `--noplugin` cannot reach them → `monitor.bluez = disabled` in
+  `~/.config/wireplumber/wireplumber.conf.d/50-disable-bluez.conf`
 
-### Two traps worth knowing
+## Dual mode is required
+
+ANCS is pure BLE, so LE-only *ought* to work. **It does not.** iOS will not
+list a pure-BLE peripheral in Settings → Bluetooth however correct its
+solicitation is — verified on air: AD type `0x15` carrying the real ANCS UUID,
+100 ms interval, connectable, named, and the iPhone showed nothing. Classic
+Bluetooth must be available for the phone to discover and keep the accessory.
+Once connected, the ANCS link itself rides LE (`hcitool con` shows
+`LE … AUTH ENCRYPT`), and pairing over classic derives the LE keys via CTKD.
+
+## THE RECONNECT BUG — why it used to be "hit or miss"
+
+This is the one that made the whole thing feel broken, and the cause was in
+the gateway, not the radio.
+
+The old version paged bonded phones itself every 30 s with
+`Device1.Connect()`. For a **dual-mode bond** — which is what pairing through
+iOS Settings always produces, via CTKD — BlueZ routes `Connect()` over
+**BR/EDR**, and the iPhone exposes no classic profile this host wants. So
+every attempt failed with:
+
+```
+org.bluez.Error.Failed: br-connection-profile-unavailable
+```
+
+**9 600+ consecutive failures were logged on the Pi** (one every 30 s for
+~80 hours, `linked:false` throughout). BlueZ does **not** fall back to LE
+after that error, so the transport ANCS actually needs was never tried. An
+earlier version of this README called that error "harmless" — it was not.
+
+The fix is to use the model every real ANCS accessory uses: **keep a
+connectable LE advertisement soliciting ANCS on the air and let iOS reconnect
+to it.** `ensure_advertising()` re-registers the advertisement whenever BlueZ
+releases it (adapter power cycle, daemon `Release()`, controller reset) —
+if the advert lapses the phone has nothing to reconnect *to*, which looks
+exactly like "sometimes it works". The direct `Connect()` is kept only as a
+rate-limited (5 min) fallback so it cannot flood the log or keep the
+controller busy paging a phone that is out of range.
+
+### Other traps worth knowing
 
 **`btmgmt` silently ignores its command when it has no tty** — it exits 0
 having done nothing, and under systemd it blocks until the unit times out.
@@ -58,15 +106,32 @@ Every `btmgmt` call must go through a pty: `script -qec "btmgmt …" /dev/null`.
 **Power-cycling `bredr` clears `ssp`.** Without Secure Simple Pairing the
 adapter offers only legacy PIN pairing and iOS will not pair with it at all —
 while still looking healthy in `hciconfig`. Always check that `current
-settings` contains **both** `br/edr` and `ssp`. `ancs-prep.sh` asserts this on
-every boot.
+settings` contains **both** `br/edr` and `ssp`.
+
+**`connectable` and `bondable` are not implied by anything.** `connectable` is
+page scan: without it iOS *cannot initiate a reconnection* and you must connect
+by hand every time. The Mac mini booted with **neither** set (`current
+settings: powered ssp br/edr le secure-conn`), so pairing would have failed
+outright. `ancs-prep.sh` asserts both on every boot.
+
+**`btmon` labels AD type `0x15` (solicitation) and `0x06`/`0x07` (plain service
+UUID lists) identically** as "128-bit Service UUIDs", so a capture cannot tell
+you whether the solicitation really went out. `decode_solicit.py` reads the
+actual type byte out of a `btmon -w` capture:
+
+```bash
+sudo btmon -w /tmp/adv.btsnoop &   # then restart the gateway
+sudo python3 decode_solicit.py /tmp/adv.btsnoop
+# offset 868: len=0x11 type=0x15  128-bit SERVICE SOLICITATION  <-- correct
+```
 
 ## Files
 
 | file | what it is |
 | --- | --- |
 | `ancs_gateway.py` | the gateway: BlueZ D-Bus advertising + agent, ANCS GATT client, JSON API on `:8099` |
-| `ancs-prep.sh` | clears the leftover rfkill soft-block, waits for `hci0` |
+| `ancs-prep.sh` | clears any rfkill soft-block, waits for `hci0`, asserts `br/edr ssp connectable bondable le` every boot |
+| `decode_solicit.py` | reads the real AD type byte out of a `btmon` capture (see above) |
 | `ancs-prep.service` / `ancs-gateway.service` | systemd units (both enabled) |
 | `notify_widget.html` | the toast — self-contained CSS+JS, injected into each display |
 | `patch_display.py` | idempotently injects the toast into a display's HTML |
@@ -77,31 +142,42 @@ every boot.
 ```bash
 sudo mkdir -p /opt/ancs && sudo cp ancs_gateway.py ancs-prep.sh /opt/ancs/
 sudo cp ancs-prep.service ancs-gateway.service /etc/systemd/system/
-sudo sed -i 's|^#ControllerMode = dual|ControllerMode = dual|' /etc/bluetooth/main.conf
-sudo sed -i 's|^#Experimental = false|Experimental = true|' /etc/bluetooth/main.conf
 sudo systemctl daemon-reload
 sudo systemctl enable --now bluetooth ancs-prep ancs-gateway
 ```
 
+`/etc/bluetooth/main.conf` needs, under `[General]`:
+
+```ini
+ControllerMode = dual
+JustWorksRepairing = always
+Experimental = true
+```
+
 Needs `python3-dbus` and `python3-gi`. `Experimental = true` is what makes
-BlueZ honour `SolicitUUIDs` and the advertising-interval properties — without
-it BlueZ advertises every 1280 ms, slow enough that an iOS scan can take a
-very long time to notice the Pi.
+BlueZ honour the advertising-interval properties — without it BlueZ advertises
+every 1280 ms, slow enough that an iOS Settings scan can take a very long time
+to notice the host. `JustWorksRepairing = always` is what lets a phone that
+tapped *Forget This Device* pair again.
+
+On a desktop host, also disable the Bluetooth audio profiles (see above) so
+the phone cannot route call audio to it.
 
 ## Pairing
 
-iPhone → Settings → Bluetooth → **BirdThing** under *Other Devices* → pair,
-then allow *Show Notifications* (or enable it under the ⓘ). Range is ~10 m,
-so the phone only feeds the gateway while it is near this Pi.
+iPhone → Settings → Bluetooth → **BirdThing Hub** under *Other Devices* →
+pair, then allow *Share System Notifications* on the prompt (or enable it
+later under the ⓘ). Range is ~10 m, so the phone only feeds the gateway while
+it is near the mini.
 
-The Pi stays discoverable whenever **no phone is linked**, so you can always
+The host stays discoverable whenever **no phone is linked**, so you can always
 re-pair from the phone alone. To force a window anyway:
 
 ```bash
-curl "http://192.168.1.250:8099/api/pair?mins=20"
+curl "http://192.168.1.72:8099/api/pair?mins=20"
 ```
 
-**If you tap "Forget This Device" on the phone, clear the Pi's side too** —
+**If you tap "Forget This Device" on the phone, clear the host's side too** —
 otherwise the bond is one-sided and pairing walls up in a
 `LinkKeyRequest → NegativeReply → disconnect` loop (the same failure that cost
 days on the Car Thing):
@@ -119,9 +195,13 @@ server proxies the gateway on the origin the page was loaded from.
 
 | display | endpoint |
 | --- | --- |
-| BirdThing dashboard (birdpi `:8090`) | `/api/notify` → `127.0.0.1:8099` |
-| WeatherThing (bedroom Pi `:8090`) | `/api/notify` → `192.168.1.250:8099` |
-| bedroom kiosk (bedroom Pi `:8080`) | direct to `192.168.1.250:8099` (CORS) |
+| BirdThing dashboard (birdpi `:8090`) | `/api/notify` → `192.168.1.72:8099` |
+| WeatherThing (bedroom Pi `:8090`) | `/api/notify` → `192.168.1.72:8099` |
+| bedroom kiosk (bedroom Pi `:8080`) | direct to `192.168.1.72:8099` (CORS) |
+
+**The mini's `192.168.1.72` is a DHCP lease, and it is now baked into all three
+places.** If the lease ever moves, all three displays go quiet at once. Give it
+a DHCP reservation on the router.
 
 The first poll after a page load only seeds: a reload never replays the
 backlog. Incoming calls stay on screen until the phone says the call ended;
@@ -132,6 +212,10 @@ everything else clears after 9 s. Notification text is rendered with
 
 - `GET /api/notifications` — recent notifications + `linked` state
 - `GET /healthz`
+- `GET /api/status` — **start here when something is wrong.** Reports whether
+  the advertisement is actually registered, what is bonded (with RSSI), the
+  last reconnect error, whether a phone is connected *without* ANCS attached,
+  and a plain-English `verdict` naming the most likely cause
 - `GET /api/pair?mins=20` — re-open classic discoverability to (re-)pair a phone
 - `GET /api/test?cat=IncomingCall&app=Phone&title=X&message=Y` — inject a
   synthetic notification to test the display chain without a real call
@@ -149,14 +233,11 @@ room. Message bodies stay out of the journal unless `log_bodies` is set.
 
 ## Limits
 
-- **Range.** BLE is ~10 m. Away from this Pi, nothing arrives.
+- **Range.** BLE is ~10 m. Away from the mini, nothing arrives. This is the
+  one thing moving hosts does not fix — it relocates the coverage, it does not
+  extend it. Whichever room the mini is in is where the phone has to be.
 - **Unencrypted on the LAN.** The gateway serves message text over plain HTTP
   to anything on the network.
-- **The address clash is mitigated, not gone** — see above. Classic Bluetooth
-  has to stay enabled, so this Pi does answer paging on the address the bedroom
-  Pi spoofs.
-- iOS drops the link when idle. The gateway pages bonded phones every 30 s to
-  bring it back; `br-connection-profile-unavailable` in the log is a harmless
-  outbound attempt, the phone reconnects on its own terms.
+- **The mini's IP is a DHCP lease** baked into three files — see above.
 - iOS re-grants ANCS on reconnect; if notifications stop, check
-  *Show Notifications* is still on under the ⓘ next to BirdThing.
+  *Show Notifications* is still on under the ⓘ next to **BirdThing Hub**.
