@@ -48,10 +48,12 @@ DATA_SOURCE = "22eac6e9-24d6-4bb5-be44-b36ace7c7bfb"
 ADV_PATH = "/org/birdthing/ancs/adv0"
 AGENT_PATH = "/org/birdthing/ancs/agent"
 
-# GATT subscribe can lose a race with a flapping link; retry rather than sit
-# there claiming to be linked with nothing subscribed
-ATTACH_RETRY_S = 1.5
-ATTACH_MAX_TRIES = 5
+# BlueZ runs one ATT operation at a time per connection, so a StartNotify
+# issued while another is outstanding comes back InProgress. Retry that one
+# characteristic after a short pause rather than restarting the whole attach.
+SUBSCRIBE_RETRY_MS = 700
+SUBSCRIBE_MAX_TRIES = 6
+VERIFY_MAX_ROUNDS = 4
 
 # --- ANCS constants -------------------------------------------------------
 EVT_ADDED, EVT_MODIFIED, EVT_REMOVED = 0, 1, 2
@@ -238,6 +240,10 @@ DIAG = {
     "last_reconnect_at": 0.0,
     "classic_connected": False, # phone attached over BR/EDR but no ANCS = the
                                 # classic symptom of "connected but no toasts"
+    # which ANCS characteristics are ACTUALLY subscribed. Without
+    # notification_source nothing can ever arrive, however healthy the rest
+    # of the link looks - this is the field to check first.
+    "notifying": {"notification_source": False, "data_source": False},
     "started": time.time(),
 }
 
@@ -345,7 +351,6 @@ class AncsClient:
         self.ds_buf = bytearray()
         self.pending = deque()    # notification uids awaiting attributes
         self.inflight = None
-        self._attach_tries = {}   # device path -> consecutive failed subscribes
 
     # -- connection lifecycle --
     def scan_existing(self):
@@ -397,42 +402,14 @@ class AncsClient:
             self.cp = None
             log("no control point - titles/bodies will be unavailable")
 
-        # Data source first: it must be listening before any request goes out.
-        #
-        # These subscriptions are what actually deliver notifications, and they
-        # DO fail in practice - a flapping link produces 'ATT error: 0x0e' and
-        # 'org.bluez.Error.InProgress' (both seen live). The old code merely
-        # logged that and declared the phone linked anyway, which is the worst
-        # possible outcome: /healthz says linked:true, the displays sit there
-        # polling, and nothing is subscribed so no notification can ever arrive.
-        # Treat a failed subscribe as "not attached" and retry instead.
-        failed = []
-        for uuid in (DATA_SOURCE, NOTIFICATION_SOURCE):
-            try:
-                dbus.Interface(self.bus.get_object(BUS_NAME, chrcs[uuid]),
-                               GATT_CHRC_IFACE).StartNotify()
-            except dbus.exceptions.DBusException as exc:
-                if "Already" in str(exc):
-                    continue            # already subscribed is success
-                failed.append(uuid)
-                log("StartNotify failed for %s: %s" % (uuid, exc))
+        # Subscribe to both characteristics, SERIALLY - see _subscribe_chain.
+        # Attaching does not wait for it: an earlier version refused to attach
+        # until both subscribes returned cleanly, and that turned a transient
+        # error into a total outage (the gateway gave up entirely and no
+        # notification could arrive at all). The chain self-heals in the
+        # background and reports the truth via /api/status.
+        self._subscribe_chain(chrcs)
 
-        if failed:
-            tries = self._attach_tries.get(device_path, 0) + 1
-            self._attach_tries[device_path] = tries
-            self.device_path = None     # not attached - do not claim linked
-            self.cp = None
-            if tries <= ATTACH_MAX_TRIES:
-                log("subscribe incomplete (%d/%d) - retrying in %.1fs"
-                    % (tries, ATTACH_MAX_TRIES, ATTACH_RETRY_S))
-                GLib.timeout_add(int(ATTACH_RETRY_S * 1000),
-                                 lambda p=device_path: (self.try_attach(p), False)[1])
-            else:
-                log("subscribe failed %d times on %s - giving up until the "
-                    "phone reconnects" % (tries, device_path))
-            return
-
-        self._attach_tries.pop(device_path, None)
         name = "phone"
         try:
             props = dbus.Interface(
@@ -443,16 +420,104 @@ class AncsClient:
         STORE.set_link(True, name)
         log("linked to %s" % name)
 
+    def _notifying(self, path):
+        """The authoritative answer to 'am I subscribed?' - the exception from
+        StartNotify is not one, since InProgress can still land successfully."""
+        try:
+            return bool(dbus.Interface(
+                self.bus.get_object(BUS_NAME, path), DBUS_PROP_IFACE
+            ).Get(GATT_CHRC_IFACE, "Notifying"))
+        except Exception:                                   # noqa: BLE001
+            return False
+
+    def _subscribe_chain(self, chrcs, order=None, tries=0, verify_round=0):
+        """StartNotify on the ANCS characteristics ONE AT A TIME.
+
+        THE BUG THIS FIXES: BlueZ processes one ATT operation at a time per
+        connection. Firing StartNotify on Data Source and Notification Source
+        back-to-back means the second reliably collides with the first and
+        returns `org.bluez.Error.InProgress`. Retrying on a timer collides
+        again - observed as 7 consecutive InProgress failures on both
+        characteristics, after which the gateway stopped attaching entirely.
+
+        So each StartNotify is issued only from the PREVIOUS one's reply
+        handler, and InProgress is retried on that characteristic alone rather
+        than restarting the whole attach. Success is judged by the `Notifying`
+        property, never by the absence of an exception.
+        """
+        if order is None:
+            # data source first: it must be listening before any control-point
+            # request goes out, or the reply is missed
+            order = [DATA_SOURCE, NOTIFICATION_SOURCE]
+        if not order:
+            GLib.timeout_add(
+                1000,
+                lambda: (self._verify_notifying(chrcs, verify_round), False)[1])
+            return
+
+        uuid, rest = order[0], order[1:]
+        path = chrcs.get(uuid)
+        if path is None or self._notifying(path):
+            self._subscribe_chain(chrcs, rest, verify_round=verify_round)
+            return
+
+        def ok():
+            self._subscribe_chain(chrcs, rest, verify_round=verify_round)
+
+        def err(exc):
+            s = str(exc)
+            if "Already" in s:
+                self._subscribe_chain(chrcs, rest, verify_round=verify_round)
+            elif "InProgress" in s and tries < SUBSCRIBE_MAX_TRIES:
+                # let the in-flight operation finish, then retry THIS one only
+                GLib.timeout_add(
+                    SUBSCRIBE_RETRY_MS,
+                    lambda: (self._subscribe_chain(chrcs, order, tries + 1,
+                                                   verify_round), False)[1])
+            else:
+                log("StartNotify failed for %s: %s" % (uuid, exc))
+                self._subscribe_chain(chrcs, rest, verify_round=verify_round)
+
+        try:
+            dbus.Interface(self.bus.get_object(BUS_NAME, path),
+                           GATT_CHRC_IFACE).StartNotify(
+                               reply_handler=ok, error_handler=err)
+        except Exception as exc:                            # noqa: BLE001
+            log("StartNotify dispatch failed for %s: %s" % (uuid, exc))
+            self._subscribe_chain(chrcs, rest, verify_round=verify_round)
+
+    def _verify_notifying(self, chrcs, round_=0):
+        """Report what actually ended up subscribed, and heal it if not."""
+        ns = self._notifying(chrcs[NOTIFICATION_SOURCE])
+        ds = self._notifying(chrcs[DATA_SOURCE])
+        DIAG["notifying"] = {"notification_source": ns, "data_source": ds}
+        if ns and ds:
+            log("subscribed: notification source + data source")
+            return
+        # Notification Source is the one that delivers events at all; without
+        # it the link is useless however healthy it looks.
+        if round_ >= VERIFY_MAX_ROUNDS:
+            log("STILL not subscribed after %d rounds "
+                "(notification_source=%s data_source=%s) - the phone has to "
+                "reconnect; see /api/status" % (round_, ns, ds))
+            return
+        log("not fully subscribed (notification_source=%s data_source=%s)"
+            " - healing, round %d" % (ns, ds, round_ + 1))
+        retry = [u for u, okd in ((DATA_SOURCE, ds), (NOTIFICATION_SOURCE, ns))
+                 if not okd]
+        GLib.timeout_add(
+            2000,
+            lambda: (self._subscribe_chain(chrcs, retry, verify_round=round_ + 1),
+                     False)[1])
+
     def detach(self, device_path):
-        # a genuine disconnect resets the subscribe budget even if we were
-        # mid-retry (device_path is None then, so the guard below would skip it)
-        self._attach_tries.pop(device_path, None)
         if device_path != self.device_path:
             return
         log("phone disconnected")
         self.device_path = None
         self.cp = None
         self.ds_buf = bytearray()
+        DIAG["notifying"] = {"notification_source": False, "data_source": False}
         STORE.set_link(False)
 
     # -- notification source --
@@ -890,7 +955,13 @@ class Handler(BaseHTTPRequestHandler):
             diag["local_name"] = CFG["local_name"]
             # a plain-English read of the state, so "is it working?" does not
             # require interpreting six booleans
-            if snap["linked"]:
+            notif_ok = diag.get("notifying", {}).get("notification_source")
+            if snap["linked"] and not notif_ok:
+                diag["verdict"] = ("linked but the ANCS Notification Source is "
+                                   "NOT subscribed - nothing can arrive. This is "
+                                   "the silent failure: the link looks healthy "
+                                   "and delivers nothing.")
+            elif snap["linked"]:
                 diag["verdict"] = "linked - notifications will arrive"
             elif diag["classic_connected"]:
                 diag["verdict"] = ("phone is connected but ANCS is not attached: "
