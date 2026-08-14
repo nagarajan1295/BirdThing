@@ -244,11 +244,47 @@ DIAG = {
     # notification_source nothing can ever arrive, however healthy the rest
     # of the link looks - this is the field to check first.
     "notifying": {"notification_source": False, "data_source": False},
+    # Class of Device. If this reads as a COMPUTER, iOS will not offer "Share
+    # System Notifications" at all and ANCS can never be granted - it treats a
+    # computer as a peer machine rather than an accessory.
+    "class_of_device": "",
+    # Whether the bond actually carries LE keys. ANCS rides LE, so a BR/EDR-only
+    # bond (no CTKD) can never deliver a notification no matter how healthy the
+    # classic link looks. This is what a silently-useless pairing looks like.
+    "bond_le": None,
     "started": time.time(),
 }
 
 
 # --- BlueZ helpers --------------------------------------------------------
+def read_bond_quality(adapter_addr, dev_addr):
+    """Does this bond carry the LE keys ANCS needs?
+
+    Pairing through iOS Settings happens over classic; the LE keys are supposed
+    to be derived from it by CTKD, giving SupportedTechnologies=BR/EDR;LE plus a
+    PeripheralLongTermKey and an IdentityResolvingKey. When that does NOT happen
+    the bond is BR/EDR only, the phone shows as paired and connected, and ANCS
+    can never work - it rides LE. That failure is invisible from every normal
+    status view, so surface it explicitly.
+    """
+    path = "/var/lib/bluetooth/%s/%s/info" % (adapter_addr, dev_addr)
+    try:
+        with open(path) as fh:
+            txt = fh.read()
+    except Exception:                                       # noqa: BLE001
+        return None
+    techs = ""
+    for line in txt.splitlines():
+        if line.startswith("SupportedTechnologies="):
+            techs = line.split("=", 1)[1].strip()
+    return {
+        "technologies": techs,
+        "le": "LE" in techs.upper().split(";"),
+        "long_term_key": "[PeripheralLongTermKey]" in txt or "[LongTermKey]" in txt,
+        "identity_resolving_key": "[IdentityResolvingKey]" in txt,
+    }
+
+
 def get_managed_objects(bus):
     om = dbus.Interface(bus.get_object(BUS_NAME, "/"), DBUS_OM_IFACE)
     return om.GetManagedObjects()
@@ -872,6 +908,25 @@ def main():
             DIAG["bonded"] = bonded
             DIAG["classic_connected"] = classic_only
 
+            # Class of Device: a COMPUTER never gets offered notification
+            # sharing by iOS. Cheap to read, and it silently invalidates
+            # everything else, so keep it in view.
+            try:
+                cls = int(props.Get(ADAPTER_IFACE, "Class"))
+                major = (cls >> 8) & 0x1F
+                DIAG["class_of_device"] = "0x%06x%s" % (
+                    cls, " (COMPUTER - iOS will NOT offer notification sharing)"
+                    if major == 1 else "")
+            except Exception:                               # noqa: BLE001
+                pass
+
+            # does the bond actually carry LE keys?
+            if bonded:
+                dev_addr = bonded[0]["path"].rsplit("dev_", 1)[-1].replace("_", ":")
+                DIAG["bond_le"] = read_bond_quality(DIAG["address"], dev_addr)
+            else:
+                DIAG["bond_le"] = None
+
             # RECONCILE: a PropertiesChanged "Connected: false" can be missed
             # (bus hiccup, or the drop happening between scan_existing() and
             # the signal handler being wired at startup). Without this the
@@ -971,6 +1026,13 @@ class Handler(BaseHTTPRequestHandler):
             elif not diag["advertising"]:
                 diag["verdict"] = ("NOT advertising - the phone has nothing to "
                                    "reconnect to. See adv_last_error.")
+            elif diag["bonded"] and (diag.get("bond_le") or {}).get("le") is False:
+                diag["verdict"] = (
+                    "bonded, but the bond is BR/EDR ONLY - no LE keys were "
+                    "derived (CTKD did not happen). ANCS rides LE, so this "
+                    "pairing can NEVER deliver a notification however healthy "
+                    "it looks. Forget the device on the phone, remove it here "
+                    "with 'bluetoothctl remove', and pair again.")
             elif diag["bonded"]:
                 diag["verdict"] = ("advertising and bonded, waiting for the "
                                    "phone to come back in range")

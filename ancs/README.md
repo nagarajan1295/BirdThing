@@ -20,7 +20,26 @@ iPhone --BLE/ANCS--> Mac mini (gateway :8099) --HTTP--> the three displays
 One radio serves all three screens: the gateway holds notifications in memory
 and every display reads the same JSON.
 
-## The gateway moved to the Mac mini (2026-08-13)
+## Host: the BirdThing Pi (moved to the Mac mini and back, 2026-08-13)
+
+It briefly ran on the Mac mini. **That was a mistake, for two reasons worth
+recording** — the section below explains why the mini looked attractive:
+
+1. **A desktop advertises Class of Device `0x00010c` = Computer/Laptop, and iOS
+   will not offer "Share System Notifications" to a device it classifies as a
+   COMPUTER.** It treats it as a peer machine rather than an accessory, so the
+   toggle never appears and ANCS can never be granted. The Pi presents
+   `0x400000` (Miscellaneous device, Telephony service class), which is
+   accessory-shaped. `ancs-prep.sh` now asserts that value on every boot.
+   **Check `hciconfig -a hci0 | grep Class` first whenever this moves hosts.**
+2. **Location beats antenna quality.** The mini has the better radio — a
+   dedicated USB BCM20702 on the Mac's own antenna — but it is in the wrong
+   room. BLE is ~10 m; the Pi is where the user actually sits.
+
+The mini's install is left in place but disabled, so it is one
+`systemctl enable --now ancs-prep ancs-gateway` away if it is ever wanted.
+
+## Why the mini looked like a good idea (2026-08-13)
 
 It first ran on the **BirdThing Pi** and was unreliable there: the phone never
 reconnected on its own, and connecting it by hand produced no notifications.
@@ -174,8 +193,31 @@ The host stays discoverable whenever **no phone is linked**, so you can always
 re-pair from the phone alone. To force a window anyway:
 
 ```bash
-curl "http://192.168.1.72:8099/api/pair?mins=20"
+curl "http://192.168.1.250:8099/api/pair?mins=20"
 ```
+
+### Automatic reconnection — what is and is not possible
+
+**The phone is the initiator, not the Pi.** For ANCS the accessory is the BLE
+*peripheral*: it advertises, and iOS (the *central*) connects to it. So the Pi
+cannot "page" the iPhone the way a Bluetooth speaker gets reconnected — the
+iPhone exposes no classic profile to connect to, which is what
+`br-connection-profile-unavailable` was telling us for 9 600 attempts.
+
+What makes reconnection automatic in practice, all now enforced:
+
+- a **connectable** advertisement soliciting ANCS, always on the air at
+  100–150 ms, re-registered by a watchdog whenever BlueZ releases it
+- **`connectable` (page scan) asserted on every boot** — losing it is the
+  single most common cause of "I have to connect it by hand every time", and it
+  is not implied by `br/edr` or `ssp`
+- an **LE bond** (`bond_le.le == true`), without which iOS has nothing to
+  reconnect *to* over the transport ANCS needs
+- `Trusted=true` on the device, so no authorisation prompt blocks it
+
+One genuine iOS behaviour to know: if you tap **Disconnect** in Settings →
+Bluetooth, iOS deliberately will not reconnect to that accessory until you tap
+it again. Out-of-range → back-in-range does reconnect on its own.
 
 **If you tap "Forget This Device" on the phone, clear the host's side too** —
 otherwise the bond is one-sided and pairing walls up in a
@@ -195,13 +237,20 @@ server proxies the gateway on the origin the page was loaded from.
 
 | display | endpoint |
 | --- | --- |
-| BirdThing dashboard (birdpi `:8090`) | `/api/notify` → `192.168.1.72:8099` |
-| WeatherThing (bedroom Pi `:8090`) | `/api/notify` → `192.168.1.72:8099` |
-| bedroom kiosk (bedroom Pi `:8080`) | direct to `192.168.1.72:8099` (CORS) |
+| BirdThing dashboard (birdpi `:8090`) | `/api/notify` → `127.0.0.1:8099` |
+| WeatherThing (bedroom Pi `:8090`) | `/api/notify` → `192.168.1.250:8099` |
+| bedroom kiosk (bedroom Pi `:8080`) | `/api/notify` → `192.168.1.250:8099` |
 
-**The mini's `192.168.1.72` is a DHCP lease, and it is now baked into all three
-places.** If the lease ever moves, all three displays go quiet at once. Give it
-a DHCP reservation on the router.
+**Every display goes through a same-origin proxy — none of them fetches the
+gateway directly any more.** The kiosk used to, and it was silently broken: the
+cross-origin request was blocked by the browser and the widget swallows every
+fetch error (`.catch(function(){})`), so there was no toast and no clue. If a
+display ever shows nothing, check its proxy with `curl` before suspecting
+Bluetooth.
+
+Chromium also serves `index.html` from its own HTTP cache across kiosk
+restarts, so a patched page can keep running the old one; the kiosk server now
+sends `Cache-Control: no-store` for it.
 
 The first poll after a page load only seeds: a reload never replays the
 backlog. Incoming calls stay on screen until the phone says the call ended;
@@ -215,7 +264,23 @@ everything else clears after 9 s. Notification text is rendered with
 - `GET /api/status` — **start here when something is wrong.** Reports whether
   the advertisement is actually registered, what is bonded (with RSSI), the
   last reconnect error, whether a phone is connected *without* ANCS attached,
-  and a plain-English `verdict` naming the most likely cause
+  `notifying` per ANCS characteristic, `class_of_device` (flagged if it reads
+  as a COMPUTER), `bond_le`, and a plain-English `verdict`
+
+### `bond_le` — the check that catches a silently useless pairing
+
+Pairing happens over classic; the LE keys are supposed to be derived from it by
+**CTKD**. When that does not happen the bond is BR/EDR only, the phone shows as
+paired *and connected*, and ANCS can never work, because ANCS rides LE. A good
+bond looks like:
+
+```json
+{"technologies": "BR/EDR;LE", "le": true,
+ "long_term_key": true, "identity_resolving_key": true}
+```
+
+`"le": false` means forget the device on the phone, `bluetoothctl remove` it
+here, and pair again. A one-sided bond walls up exactly like the Car Thing saga.
 - `GET /api/pair?mins=20` — re-open classic discoverability to (re-)pair a phone
 - `GET /api/test?cat=IncomingCall&app=Phone&title=X&message=Y` — inject a
   synthetic notification to test the display chain without a real call
