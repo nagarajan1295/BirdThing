@@ -18,6 +18,7 @@ Exposes:
 Stock deps only: python3 stdlib.
 """
 import argparse
+import collections
 import json
 import os
 import threading
@@ -29,8 +30,8 @@ ABSENT = -105.0  # RSSI stand-in for "this node cannot hear the phone"
 STATE_LOCK = threading.Lock()
 NODES = {}          # node -> {rssi, age, ts}
 FINGERPRINTS = {}   # room -> [vector, ...]
-DECISION = {"room": None, "candidate": None, "since": 0.0, "confidence": 0.0,
-            "changed_at": 0.0, "distances": {}}
+DECISION = {"room": None, "confidence": 0.0, "changed_at": 0.0, "distances": {}}
+VOTES = collections.deque(maxlen=300)  # (timestamp, room|None), one per second
 CFG = {}
 
 
@@ -67,21 +68,25 @@ def distance(vec, fp, node_names):
 
 
 def decide(node_names):
-    """Nearest-fingerprint room, with a margin gate and a dwell timer.
+    """Nearest-fingerprint room, committed by rolling vote.
 
-    Two guards against flapping mid-song: the winner must beat the runner-up by
-    `margin` dB, and it must hold that win for `dwell` seconds before we accept.
+    An earlier version used a dwell timer that reset whenever the instantaneous
+    winner changed. RSSI is noisy enough that the winner flips constantly, so the
+    timer never accumulated and the decision froze on whatever it had first --
+    it sat on "bathroom" for three minutes while every reading said kitchen.
+    A vote over the last `dwell` seconds tolerates that flapping instead.
     """
     vec = current_vector(node_names)
+    now = time.time()
     if all(v == ABSENT for v in vec.values()):
-        return vec, None, {}, 0.0
+        VOTES.append((now, None))
+        return vec, DECISION["room"], {}, 0.0
 
     scored = []
     for room, samples in FINGERPRINTS.items():
         if not samples:
             continue
-        best = min(distance(vec, s, node_names) for s in samples)
-        scored.append((best, room))
+        scored.append((min(distance(vec, s, node_names) for s in samples), room))
     if not scored:
         return vec, None, {}, 0.0
     scored.sort()
@@ -89,22 +94,60 @@ def decide(node_names):
 
     best_d, best_room = scored[0]
     runner_up = scored[1][0] if len(scored) > 1 else best_d + 999
-    margin = runner_up - best_d
-    confidence = max(0.0, min(1.0, margin / CFG["margin"]))
+    # Only vote when this reading actually prefers one room; an ambiguous
+    # reading abstains rather than dragging the tally around.
+    VOTES.append((now, best_room if (runner_up - best_d) >= CFG["margin"] else None))
 
-    now = time.time()
-    if margin < CFG["margin"]:
-        # Ambiguous -- hold whatever room we last committed to.
-        DECISION["candidate"] = None
-        return vec, DECISION["room"], dists, confidence
-
-    if DECISION["candidate"] != best_room:
-        DECISION["candidate"] = best_room
-        DECISION["since"] = now
-    if best_room != DECISION["room"] and (now - DECISION["since"]) >= CFG["dwell"]:
-        DECISION["room"] = best_room
-        DECISION["changed_at"] = now
+    window = [r for ts, r in VOTES if now - ts <= CFG["dwell"]]
+    cast = [r for r in window if r]
+    confidence = 0.0
+    if cast and len(window) >= CFG["dwell"] * 0.5:
+        winner = max(set(cast), key=cast.count)
+        share = cast.count(winner) / len(window)
+        confidence = round(share, 2)
+        if share >= CFG["vote_share"] and winner != DECISION["room"]:
+            DECISION["room"] = winner
+            DECISION["changed_at"] = now
     return vec, DECISION["room"], dists, confidence
+
+
+def fingerprint_quality(node_names):
+    """Flag captures that sit closer to another room's centre than their own.
+
+    One mislabelled capture is enough to break everything: rooms are scored by
+    their *nearest* fingerprint, so a stray print parked in the kitchen's signal
+    space will claim every kitchen reading for the bathroom.
+    """
+    centroids = {}
+    for room, samples in FINGERPRINTS.items():
+        if samples:
+            centroids[room] = {n: sum(s.get(n, ABSENT) for s in samples) / len(samples)
+                               for n in node_names}
+    report = {"rooms": {}, "separation": {}, "misfits": []}
+    for room, samples in FINGERPRINTS.items():
+        entries = []
+        for i, s in enumerate(samples):
+            own = distance(s, centroids[room], node_names)
+            others = {r: distance(s, c, node_names)
+                      for r, c in centroids.items() if r != room}
+            nearest = min(others, key=others.get) if others else None
+            bad = nearest is not None and others[nearest] < own
+            entries.append({"index": i, "fingerprint": s, "to_own_centre": round(own, 1),
+                            "nearest_other": nearest,
+                            "to_nearest_other": round(others[nearest], 1) if nearest else None,
+                            "misfit": bad})
+            if bad:
+                report["misfits"].append({"room": room, "index": i, "fingerprint": s,
+                                          "closer_to": nearest})
+        report["rooms"][room] = {"count": len(samples),
+                                 "centroid": {k: round(v, 1) for k, v in centroids[room].items()},
+                                 "captures": entries}
+    rooms = sorted(centroids)
+    for i, a in enumerate(rooms):
+        for b in rooms[i + 1:]:
+            report["separation"][f"{a} vs {b}"] = round(
+                distance(centroids[a], centroids[b], node_names), 1)
+    return report
 
 
 def decision_loop(node_names):
@@ -196,6 +239,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(out))
         if self.path == "/fingerprints":
             return self._send(200, json.dumps(FINGERPRINTS, indent=1))
+        if self.path == "/quality":
+            with STATE_LOCK:
+                return self._send(200, json.dumps(fingerprint_quality(CFG["nodes"]), indent=1))
         self._send(404, "{}")
 
     def do_POST(self):
@@ -239,6 +285,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"ok": True, "room": room,
                                                "fingerprint": avg, "count": count}))
 
+        if self.path == "/prune":
+            # Drop captures that sit in another room's signal space.
+            with STATE_LOCK:
+                bad = fingerprint_quality(CFG["nodes"])["misfits"]
+                for m in sorted(bad, key=lambda m: -m["index"]):
+                    del FINGERPRINTS[m["room"]][m["index"]]
+                save_fingerprints(CFG["store"])
+                VOTES.clear()
+                DECISION["room"] = None
+            return self._send(200, json.dumps({"ok": True, "dropped": bad}))
+
         if self.path == "/forget":
             room = (body.get("room") or "").strip().lower()
             with STATE_LOCK:
@@ -261,11 +318,13 @@ def main():
     p.add_argument("--margin", type=float, default=6.0,
                    help="dB the best room must beat the runner-up by")
     p.add_argument("--stale-after", type=float, default=45.0)
+    p.add_argument("--vote-share", type=float, default=0.6,
+                   help="fraction of the dwell window that must agree to commit")
     a = p.parse_args()
 
     CFG.update(nodes=[n.strip() for n in a.nodes.split(",") if n.strip()],
                store=a.store, dwell=a.dwell, margin=a.margin,
-               stale_after=a.stale_after)
+               stale_after=a.stale_after, vote_share=a.vote_share)
     os.makedirs(os.path.dirname(a.store), exist_ok=True)
     load_fingerprints(a.store)
 

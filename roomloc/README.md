@@ -64,9 +64,23 @@ Calibrate by walking: open `http://<hub>:8093/` on the phone, stand in a room,
 type its name, tap Capture. Do each room two or three times, including an
 `elsewhere` catch-all so the system can tell you are in neither.
 
-A room change has to clear two gates before it commits — a `--margin` dB win
-over the runner-up, and a `--dwell` second hold — so walking past the bathroom
-door on the way somewhere else does not yank the music with you.
+A room change commits by **rolling vote**: each second's reading either names a
+room (if it beats the runner-up by `--margin` dB) or abstains, and a room is
+committed once it holds `--vote-share` of the last `--dwell` seconds. Do not
+replace this with a dwell timer that resets when the instantaneous winner
+changes — RSSI flips winners constantly, such a timer never accumulates, and the
+decision freezes on whatever it saw first.
+
+**Check the calibration before trusting it.** `GET /quality` reports each room's
+centroid, how far apart the rooms sit, and any capture that landed closer to a
+different room's centre. Those misfits matter more than they look: rooms are
+scored by their *nearest* fingerprint, so one stray capture parked in the
+kitchen's signal space claims every kitchen reading for the bathroom. `POST
+/prune` drops them. Separation below ~8 dB means the rooms are not reliably
+distinguishable — recapture, or add an anchor.
+
+Hold the phone the same way you normally carry it when capturing. A body between
+phone and Pi is worth ~20 dB, which is larger than the gap between many rooms.
 
 ## Layout
 
