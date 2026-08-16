@@ -165,11 +165,26 @@ class Store:
             return item
 
     def remove(self, uid):
+        """The phone says this notification is gone from ITS notification centre.
+
+        That must NOT retract it from the house displays. Texting yourself, or
+        reading a message on the phone within a second or two, makes iOS clear
+        the notification almost immediately - and since the displays refuse to
+        toast anything with active=false and poll only every 2.5s, such a
+        notification could never appear at all. It arrived, it was real, and
+        the whole point of these screens is to show what came in while you were
+        away from the phone.
+
+        CALLS are the exception, and the reason this flag exists: an incoming
+        call banner is meant to stay up until the call ends, so a removal there
+        genuinely means "stop showing this".
+        """
         with self._lock:
             item = self._by_uid.get(uid)
             if item:
-                item["active"] = False
                 item["removed_ts"] = time.time()
+                if item.get("call"):
+                    item["active"] = False
 
     def known(self, uid):
         with self._lock:

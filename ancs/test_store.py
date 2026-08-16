@@ -31,13 +31,29 @@ if call["active"] is not False:
 else:
     print("PASS: ringing call was cancelled by the disconnect (active=False)")
 
-# a real ANCS removal must still work
-S.add({"uid": 1, "call": False, "active": True, "ts": 0})
-S.remove(1)
-if msg["active"] is not False:
-    print("FAIL: EVT_REMOVED no longer clears active")
+# The phone clearing a MESSAGE must not retract it from the house displays:
+# texting yourself clears it in under a second, and the displays poll every
+# 2.5s, so such a notification could otherwise never be shown at all.
+S2 = g.Store(10)
+m2 = {"uid": 10, "call": False, "active": True, "ts": 0}
+c2 = {"uid": 11, "call": True, "active": True, "ts": 0}
+S2.add(m2)
+S2.add(c2)
+S2.remove(10)
+S2.remove(11)
+
+if m2["active"] is not True:
+    print("FAIL: a message the phone cleared was retracted from the displays "
+          "- this is the 'I texted myself and nothing appeared' bug")
     ok = False
 else:
-    print("PASS: phone-side removal still clears active")
+    print("PASS: phone-cleared message still displays (removed_ts=%s)"
+          % (m2.get("removed_ts") is not None))
+
+if c2["active"] is not False:
+    print("FAIL: a call that ended was NOT dismissed")
+    ok = False
+else:
+    print("PASS: ended call is dismissed by the phone-side removal")
 
 sys.exit(0 if ok else 1)
