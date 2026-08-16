@@ -914,9 +914,19 @@ def main():
             try:
                 cls = int(props.Get(ADAPTER_IFACE, "Class"))
                 major = (cls >> 8) & 0x1F
+                warn = []
+                if major == 1:
+                    warn.append("COMPUTER - iOS will NOT offer notification "
+                                "sharing to a device it thinks is a computer")
+                if cls & (1 << 20):
+                    # bluetoothd's `network` plugin sets this whenever PAN/NAP
+                    # capability is registered. iOS then presents the device as
+                    # an ETHERNET/network connection rather than a notification
+                    # accessory. Fix: --noplugin=network.
+                    warn.append("NETWORKING service class set - iOS will show "
+                                "this as an ethernet/network device")
                 DIAG["class_of_device"] = "0x%06x%s" % (
-                    cls, " (COMPUTER - iOS will NOT offer notification sharing)"
-                    if major == 1 else "")
+                    cls, (" (" + "; ".join(warn) + ")") if warn else "")
             except Exception:                               # noqa: BLE001
                 pass
 

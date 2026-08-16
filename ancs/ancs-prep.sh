@@ -36,6 +36,51 @@ for _ in $(seq 1 30); do
     sleep 1
 done
 
+# =====================================================================
+# THE ADDRESS CLASH - ELIMINATED, not mitigated
+# =====================================================================
+# This Pi's factory BD address is DC:A6:32:62:53:01, and the BEDROOM Pi
+# SPOOFS that exact address to serve the WeatherThing Car Thing over BT PAN
+# (the CT's firmware is hard-locked to it, so the bedroom Pi cannot give it
+# up without reflashing the CT).
+#
+# Two devices answering on one address is not a theoretical problem - it
+# broke notifications in a way that looked like everything else:
+#   - in the bedroom the phone reached the OTHER Pi, which offers NAP, so
+#     iOS showed the connection as an ETHERNET/network device
+#   - that Pi is called "raspberrypi", so the name "BirdThing" would
+#     randomly disappear from the phone's Bluetooth list
+#   - that Pi runs no ANCS gateway, so NO notification could ever arrive
+#
+# Fix: this Pi takes a DIFFERENT address. Its Bluetooth serves only ANCS
+# (the BirdThing Car Thing is on USB, birdthing-btnap stays disabled), so
+# nothing else here depends on the factory address.
+#
+# NOTE: changing the adapter address moves bluez's bond storage to a new
+# /var/lib/bluetooth/<addr> directory, so the phone must be re-paired ONCE.
+WANT_ADDR="${WANT_ADDR:-DC:A6:32:62:53:B1}"
+cur_addr="$(hciconfig "$ADAPTER" 2>/dev/null | sed -n 's/.*BD Address: \([0-9A-F:]*\).*/\1/p' | head -1)"
+if [ -n "$WANT_ADDR" ] && [ "$cur_addr" != "$WANT_ADDR" ]; then
+    log "BD address $cur_addr -> $WANT_ADDR (clash with the bedroom Pi's spoof)"
+    mgmt power off
+    mgmt public-addr "$WANT_ADDR"
+    mgmt power on
+    sleep 2
+    # this BCM part needs an HCI reset before a written static address
+    # actually becomes the ACTIVE BD address - btmgmt power on alone is not
+    # enough (same lesson as the bedroom Pi's spoof script)
+    for i in $(seq 1 8); do
+        cur_addr="$(hciconfig "$ADAPTER" 2>/dev/null | sed -n 's/.*BD Address: \([0-9A-F:]*\).*/\1/p' | head -1)"
+        [ "$cur_addr" = "$WANT_ADDR" ] && break
+        log "address not applied yet (try $i) - hci reset"
+        hciconfig "$ADAPTER" down  2>/dev/null
+        hciconfig "$ADAPTER" reset 2>/dev/null
+        hciconfig "$ADAPTER" up    2>/dev/null
+        sleep 2
+    done
+fi
+log "BD address: $(hciconfig "$ADAPTER" 2>/dev/null | sed -n 's/.*BD Address: \([0-9A-F:]*\).*/\1/p' | head -1)"
+
 settings() { script -qec "btmgmt --index $ADAPTER info" /dev/null 2>/dev/null \
              | grep -m1 'current settings:'; }
 
