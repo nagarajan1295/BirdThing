@@ -656,8 +656,10 @@ def _clap_entities(c, key="entities"):
     return []
 
 def _ha_switches(c):
-    # togglable HA entities (switch.* / light.* / media_player.*), cached ~20 s;
-    # _led indicators sorted last. media_player is here so a TV can be a clap target.
+    # togglable HA entities (switch.* / light.* / media_player.* / remote.*), cached ~20 s;
+    # _led indicators sorted last. media_player/remote are here so a TV can be a clap target.
+    # NOTE for Apple TV: pick the remote.* entity, not media_player.* -- media_player.turn_off
+    # is accepted but does nothing on it, while remote.toggle really powers it on/off (tested).
     now = time.time()
     if now - _clap_sw["t"] < 20 and _clap_sw["list"]:
         return _clap_sw["list"]
@@ -668,7 +670,7 @@ def _ha_switches(c):
                                          headers={"Authorization": "Bearer " + c["ha_token"]})
             for s in json.load(urllib.request.urlopen(req, timeout=6)):
                 eid = s["entity_id"]
-                if eid.split(".")[0] in ("switch", "light", "media_player"):
+                if eid.split(".")[0] in ("switch", "light", "media_player", "remote"):
                     out.append({"id": eid,
                                 "name": s.get("attributes", {}).get("friendly_name", eid),
                                 "state": s.get("state"), "led": eid.endswith("_led")})
