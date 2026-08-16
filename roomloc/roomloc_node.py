@@ -62,11 +62,29 @@ class ConnRSSI:
         s.settimeout(1.5)
         self.sock = s
 
+    def _drain(self):
+        """Discard queued unsolicited events.
+
+        The mgmt socket carries every event for every controller, and a busy
+        adapter fills the buffer between polls. Without this the backlog eats
+        the whole read window and our own reply is never reached.
+        """
+        self.sock.setblocking(False)
+        try:
+            while True:
+                if not self.sock.recv(512):
+                    break
+        except (BlockingIOError, InterruptedError):
+            pass
+        finally:
+            self.sock.settimeout(1.5)
+
     def read(self):
         """dBm, or None if not connected / busy / unavailable."""
         try:
             if self.sock is None:
                 self._connect()
+            self._drain()
             pkt = struct.pack("<HHH", MGMT_OP_GET_CONN_INFO, self.index, 7)
             self.sock.send(pkt + self.addr + bytes([self.addr_type]))
             deadline = time.time() + 1.5
@@ -83,7 +101,9 @@ class ConnRSSI:
                 if status != 0 or len(p) < 19:
                     return None  # 0x0d busy / 0x0e not connected -- retry next tick
                 return struct.unpack("<b", p[16:17])[0]
-        except (OSError, socket.timeout, struct.error):
+        except TimeoutError:
+            return None  # a slow reply is not a broken socket; keep it open
+        except (OSError, struct.error):
             if self.sock:
                 try:
                     self.sock.close()
@@ -212,7 +232,9 @@ def main():
                    help="phone's identity BD_ADDR; enables live-link RSSI reads")
     p.add_argument("--identity-type", type=int, default=1,
                    help="0=BR/EDR 1=LE public 2=LE random")
-    p.add_argument("--conn-interval", type=float, default=4.0)
+    # Roughly a third of mgmt reads come back BUSY, so poll faster than the
+    # sample rate you actually want.
+    p.add_argument("--conn-interval", type=float, default=2.0)
     args = p.parse_args()
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
