@@ -381,9 +381,9 @@
   </div>
 </div>
 <div id="clapview" class="view">
-  <div class="vhead"><div class="vtitle">Clap → lights</div><div class="vclose" onclick="closeView('clapview')">Back</div></div>
+  <div class="vhead"><div class="vtitle">Clap → lights &amp; TV</div><div class="vclose" onclick="closeView('clapview')">Back</div></div>
   <div class="vbody">
-    <div class="about" style="padding:0 4px 8px">Clap twice to toggle the switches you pick below. It listens on the same mic as the birds — this <b>never</b> affects bird ID.</div>
+    <div class="about" style="padding:0 4px 8px">Clap twice to toggle what you pick below — with separate choices for daytime and for the evening. It listens on the same mic as the birds — this <b>never</b> affects bird ID.</div>
     <div class="srow"><span class="sk">Clap detection</span>
       <div class="seg2"><button data-clen="1" onclick="clEnable(1)">On</button><button data-clen="0" onclick="clEnable(0)">Off</button></div></div>
     <div class="srow"><span class="sk">Detection mode</span>
@@ -407,10 +407,15 @@
       <div class="slider mtbar" id="clBoost"><div class="bfill" id="clBoostF"></div></div>
       <span class="about" style="padding:2px 0 0">Amplifies the clap signal for a quiet room or a far‑away mic.</span></div>
     <div class="srow" style="gap:6px">
-      <span class="sk">Switches to toggle</span>
-      <span class="about" style="padding:0 0 2px">Tap to choose which lights/switches a double clap toggles — you can pick more than one.</span>
+      <span class="sk">Toggle in the evening &amp; at night</span>
+      <span class="about" style="padding:0 0 2px">Tap to choose what a double clap toggles once the sunset window opens — you can pick more than one.</span>
       <div id="clSwitches" style="width:100%">Loading…</div>
       <div class="seg2" style="margin-top:6px"><button onclick="clTest()">Test — toggle now</button></div></div>
+    <div class="srow" style="gap:6px">
+      <span class="sk">Toggle during the day</span>
+      <span class="about" style="padding:0 0 2px">What a double clap toggles from sunrise until the sunset window opens — e.g. the TV in the morning. Leave everything unpicked to have daytime claps do nothing.</span>
+      <div id="clDaySwitches" style="width:100%">Loading…</div>
+      <div class="seg2" style="margin-top:6px"><button onclick="clTest('day')">Test — toggle now</button></div></div>
     <div class="srow" style="gap:4px">
       <div class="mtl">Double‑clap window <span class="mtv" id="clDblV"></span></div>
       <div class="slider mtbar" id="clDbl"><div class="bfill" id="clDblF"></div></div>
@@ -1050,7 +1055,7 @@ async function mtLoad(){try{const c=await (await fetch('/api/mictune')).json();
 
 // ---- Clap control (Settings -> Clap page -> /api/clap*). Toggles HA switches on a double
 // clap. Fully separate from BirdNET; sensitivity/boost tune the receiver's clapdetect. ----
-let clVals={enabled:true,mode:'smart',after_sunset:false,pre_sunset_min:0,sensitivity:6,boost:1,dbl_max:0.6,cooldown:1.2,entities:[],_night:null,_set:null,_rise:null};
+let clVals={enabled:true,mode:'smart',after_sunset:false,pre_sunset_min:0,sensitivity:6,boost:1,dbl_max:0.6,cooldown:1.2,entities:[],day_entities:[],_night:null,_set:null,_rise:null};
 let clT=null,clPoll=null,clSwitches=[],clSetters={};
 const CLDEF={clSens:{key:'sensitivity',min:1,max:10,fmt:v=>Math.round(v)+' / 10'+(v<=3?' (strict)':v>=8?' (very sensitive)':'')},
   clBoost:{key:'boost',min:1,max:8,fmt:v=>v.toFixed(1)+'×'},
@@ -1070,7 +1075,7 @@ function clQueue(){clearTimeout(clT);const st=document.getElementById('clStatus'
     const p=new URLSearchParams({enabled:clVals.enabled?1:0,mode:clVals.mode,after_sunset:clVals.after_sunset?1:0,
       pre_sunset_min:clVals.pre_sunset_min|0,sensitivity:Math.round(clVals.sensitivity),
       boost:clVals.boost.toFixed(1),dbl_max:clVals.dbl_max.toFixed(2),cooldown:clVals.cooldown.toFixed(1),
-      entities:clVals.entities.join(',')});
+      entities:clVals.entities.join(','),day_entities:clVals.day_entities.join(',')});
     await fetch('/api/clap/set?'+p.toString());st.textContent='Saved ✓';
   }catch(e){st.textContent='Save failed — try again';}},500);}
 function clMark(){document.querySelectorAll('[data-clen]').forEach(b=>b.classList.toggle('on',+b.dataset.clen===(clVals.enabled?1:0)));}
@@ -1088,23 +1093,33 @@ function clPreMark(){document.querySelectorAll('[data-clpre]').forEach(b=>b.clas
 function clPre(v){clVals.pre_sunset_min=v?30:0;clPreMark();clSunNote();clQueue();}
 const _clT=s=>{try{return new Date(s).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});}catch(_){return'';}};
 function clSunNote(){const e=document.getElementById('clSunNote');if(!e)return;
-  if(!clVals.after_sunset){e.textContent='Claps work any time of day.';return;}
-  if(clVals._night==null){e.textContent='Only active after sunset (uses your Home Assistant location).';return;}
+  // With a daytime list configured the window no longer switches claps OFF by day —
+  // it hands them over to the other set of devices — so say that instead of "paused".
+  const hasDay=clVals.day_entities.length>0;
+  if(!clVals.after_sunset&&!hasDay){e.textContent='Claps work any time of day.';return;}
+  if(clVals._night==null){e.textContent='Uses your Home Assistant location to find sunset.';return;}
   const pre=clVals.pre_sunset_min>0;
-  if(clVals._night){e.textContent='🌙 Active now'+(clVals._rise?' — until sunrise ~'+_clT(clVals._rise):'')+'.';return;}
-  // daytime: show when it will switch on
+  if(clVals._night){e.textContent='🌙 Evening list active now'+(clVals._rise?' — until sunrise ~'+_clT(clVals._rise):'')
+    +(hasDay?', then the daytime list takes over.':'.');return;}
+  // daytime: show when the evening list takes over
   let from=clVals._set;
-  if(pre&&clVals._set){try{from=new Date(new Date(clVals._set).getTime()-30*60000).toISOString();}catch(_){}}
-  e.textContent='☀️ Paused — active '+(pre?'from ~'+_clT(from)+' (30 min before sunset)':'at sunset ~'+_clT(clVals._set))+', until sunrise.';}
-function clRenderSwitches(){const box=document.getElementById('clSwitches');
+  if(pre&&clVals._set){try{from=new Date(new Date(clVals._set).getTime()-clVals.pre_sunset_min*60000).toISOString();}catch(_){}}
+  const when=(pre?'~'+_clT(from)+' ('+clVals.pre_sunset_min+' min before sunset)':'sunset ~'+_clT(clVals._set));
+  e.textContent=(hasDay?'☀️ Daytime list active — the evening list takes over at '+when+', until sunrise.'
+                       :'☀️ Paused — active from '+when+', until sunrise.');}
+// one picker per time-of-day list: boxId renders clVals[key] (entities = evening,
+// day_entities = daytime), so the same HA entity can be in either or both.
+function clRenderPicker(boxId,key){const box=document.getElementById(boxId);if(!box)return;
   if(!clSwitches.length){box.innerHTML='<div class="about">No Home Assistant switches found — check the HA token.</div>';return;}
-  box.innerHTML='';clSwitches.forEach(s=>{const on=clVals.entities.includes(s.id);
+  box.innerHTML='';clSwitches.forEach(s=>{const on=clVals[key].includes(s.id);
     const b=document.createElement('button');b.className='clsw'+(on?' on':'');
     b.innerHTML=(on?'☑ ':'☐ ')+s.name+' <span class="csid">· '+s.id+'</span>';
-    b.onclick=()=>{const i=clVals.entities.indexOf(s.id);if(i>=0)clVals.entities.splice(i,1);else clVals.entities.push(s.id);clRenderSwitches();clQueue();};
+    b.onclick=()=>{const i=clVals[key].indexOf(s.id);if(i>=0)clVals[key].splice(i,1);else clVals[key].push(s.id);
+      clRenderPicker(boxId,key);clSunNote();clQueue();};
     box.appendChild(b);});}
-async function clTest(){const st=document.getElementById('clStatus');st.textContent='Toggling…';
-  try{const r=await (await fetch('/api/clap/test')).json();
+function clRenderSwitches(){clRenderPicker('clSwitches','entities');clRenderPicker('clDaySwitches','day_entities');}
+async function clTest(which){const st=document.getElementById('clStatus');st.textContent='Toggling…';
+  try{const r=await (await fetch('/api/clap/test'+(which==='day'?'?which=day':''))).json();
     st.textContent=r.ok?('Toggled: '+(r.toggled||[]).join(', ')):('Test failed: '+(r.err||'check switches/token'));}
   catch(e){st.textContent='Test failed';}}
 function clMeter(stat){if(!stat)return;const MAX=32767,pk=stat.peak||0;
@@ -1132,7 +1147,8 @@ async function openClap(){openView('clapview');const st=document.getElementById(
   try{const c=await (await fetch('/api/clap')).json();
     clVals.enabled=c.enabled;clVals.mode=c.mode||'smart';clVals.after_sunset=c.after_sunset;clVals.pre_sunset_min=c.pre_sunset_min||0;
     clVals.sensitivity=c.sensitivity;clVals.boost=c.boost;
-    clVals.dbl_max=c.dbl_max;clVals.cooldown=c.cooldown;clVals.entities=c.entities||[];clSwitches=c.switches||[];
+    clVals.dbl_max=c.dbl_max;clVals.cooldown=c.cooldown;clVals.entities=c.entities||[];
+    clVals.day_entities=c.day_entities||[];clSwitches=c.switches||[];
     clVals._night=c.sun_night;clVals._set=c.sun_set;clVals._rise=c.sun_rise;
     clSetters.clSens(c.sensitivity,false);clSetters.clBoost(c.boost,false);clSetters.clDbl(c.dbl_max,false);clSetters.clCool(c.cooldown,false);
     clMark();clModeMark();clSunMark();clPreMark();clSunNote();clRenderSwitches();clMeter(c.stat);

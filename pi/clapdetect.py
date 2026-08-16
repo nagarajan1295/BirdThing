@@ -4,10 +4,15 @@
 # Detects the sharp broadband impulse of a hand clap (loud, very short, quiet
 # before it). A DOUBLE clap -- two claps DBL_MIN..DBL_MAX seconds apart -- fires
 # an HA `<domain>.toggle` on every configured entity via REST in a BACKGROUND
-# thread, so `switch.toggle` / `light.toggle` flips them on/off exactly like
-# "clap twice on, clap twice off". Runs inside the recv process alongside
-# BirdNET; it only READS the mono samples that already flow through, so it never
-# touches the bird audio path.
+# thread, so `switch.toggle` / `light.toggle` / `media_player.toggle` flips them
+# on/off exactly like "clap twice on, clap twice off". Runs inside the recv
+# process alongside BirdNET; it only READS the mono samples that already flow
+# through, so it never touches the bird audio path.
+#
+# TIME OF DAY PICKS THE TARGET: `entities` is the evening set (the sunset window
+# below), `day_entities` the daytime one -- so the same double clap can toggle
+# the living-room lights after sunset and the TV in the morning. See
+# _target_entities().
 #
 # DETECTION IS RATIO-BASED so it survives the Car Thing mic's auto-gain: a clap
 # is scored against the *rolling background level*, not a fixed absolute (a fixed
@@ -141,9 +146,10 @@ def _load_cfg():
         with open(CFG_PATH) as f:
             c = json.load(f)
         _cfg, _cfg_mtime = c, m
-        _log("config: entities=%s enabled=%s sens=%s boost=%s mode=%s after_sunset=%s pre_min=%s"
-             % (_entities(c), c.get("enabled"), c.get("sensitivity", 6),
-                c.get("boost", 1.0), c.get("mode", "smart"),
+        _log("config: entities=%s day_entities=%s enabled=%s sens=%s boost=%s mode=%s "
+             "after_sunset=%s pre_min=%s"
+             % (_entities(c), _entities(c, "day_entities"), c.get("enabled"),
+                c.get("sensitivity", 6), c.get("boost", 1.0), c.get("mode", "smart"),
                 c.get("after_sunset", False), c.get("pre_sunset_min", 0)))
         return c
     except Exception as e:
@@ -152,11 +158,11 @@ def _load_cfg():
         return None
 
 
-def _entities(c):
-    e = c.get("entities")
+def _entities(c, key="entities"):
+    e = c.get(key)
     if isinstance(e, list) and e:
         return [x for x in e if x and "." in x]
-    if c.get("entity"):
+    if key == "entities" and c.get("entity"):
         return [c["entity"]]
     return []
 
@@ -204,16 +210,37 @@ def _sunset_allows(c):
     return False
 
 
+def _target_entities(c):
+    # Which entities a double clap should toggle RIGHT NOW.
+    #
+    # "Evening" = inside the sunset window [sunset - pre_sunset_min, sunrise];
+    # "daytime" = everything else (sunrise until that window opens). If
+    # `day_entities` is configured, daytime claps toggle THAT set instead of
+    # being ignored -- e.g. lights own the evening while the TV owns the day.
+    # With no `day_entities` the behaviour is exactly as before: one set, only
+    # gated to the evening window when `after_sunset` is on.
+    # Returns (entities, when) -- an empty list means "ignore this clap".
+    day = _entities(c, "day_entities")
+    if not day:
+        if c.get("after_sunset") and not _sunset_allows(c):
+            return [], "outside the after-sunset window"
+        return _entities(c), "evening"
+    if _sunset_allows(c):
+        return _entities(c), "evening"
+    return day, "daytime"
+
+
 def _fire_toggle():
-    # POST /api/services/<domain>/toggle for each configured entity
+    # POST /api/services/<domain>/toggle for each entity that applies right now
     c = _load_cfg()
-    ents = _entities(c) if c else []
-    if not c or not c.get("enabled") or not c.get("ha_token") or not ents:
+    if not c or not c.get("enabled") or not c.get("ha_token"):
         _log("double-clap (no HA config / disabled -> not toggling)")
         return
-    if c.get("after_sunset") and not _sunset_allows(c):
-        _log("double-clap ignored — outside the after-sunset window")
+    ents, when = _target_entities(c)
+    if not ents:
+        _log("double-clap ignored — %s" % when)
         return
+    _log("double-clap -> %s target%s: %s" % (when, "" if len(ents) == 1 else "s", ", ".join(ents)))
     for e in ents:
         domain = e.split(".")[0]
         url = c["ha_url"].rstrip("/") + "/api/services/%s/toggle" % domain

@@ -647,14 +647,17 @@ def _clap_save(c):
     except Exception:
         return False
 
-def _clap_entities(c):
-    e = c.get("entities")
+def _clap_entities(c, key="entities"):
+    e = c.get(key)
     if isinstance(e, list) and e:
         return [x for x in e if x and "." in x]
-    return [c["entity"]] if c.get("entity") else []
+    if key == "entities" and c.get("entity"):
+        return [c["entity"]]
+    return []
 
 def _ha_switches(c):
-    # togglable HA entities (switch.* / light.*), cached ~20 s; _led indicators sorted last
+    # togglable HA entities (switch.* / light.* / media_player.*), cached ~20 s;
+    # _led indicators sorted last. media_player is here so a TV can be a clap target.
     now = time.time()
     if now - _clap_sw["t"] < 20 and _clap_sw["list"]:
         return _clap_sw["list"]
@@ -665,7 +668,7 @@ def _ha_switches(c):
                                          headers={"Authorization": "Bearer " + c["ha_token"]})
             for s in json.load(urllib.request.urlopen(req, timeout=6)):
                 eid = s["entity_id"]
-                if eid.split(".")[0] in ("switch", "light"):
+                if eid.split(".")[0] in ("switch", "light", "media_player"):
                     out.append({"id": eid,
                                 "name": s.get("attributes", {}).get("friendly_name", eid),
                                 "state": s.get("state"), "led": eid.endswith("_led")})
@@ -706,6 +709,7 @@ def clap_status():
         stat["age"] = round(time.time() - stat["t"], 1)   # staleness: >5s = detector not running
     return {"enabled": bool(c.get("enabled")),
             "entities": _clap_entities(c),
+            "day_entities": _clap_entities(c, "day_entities"),
             "mode": c.get("mode", "smart"),
             "sensitivity": c.get("sensitivity", 6),
             "boost": c.get("boost", 1.0),
@@ -740,13 +744,17 @@ def clap_set(q):
     if "entities" in q:
         c["entities"] = [e for e in q["entities"][0].split(",") if e and "." in e]
         c.pop("entity", None)
+    if "day_entities" in q:      # daytime targets (empty string clears them)
+        c["day_entities"] = [e for e in q["day_entities"][0].split(",") if e and "." in e]
     c.pop("tune", None)     # sensitivity/boost supersede the old raw tune block
     _clap_save(c)
     return clap_status()
 
-def clap_test():
+def clap_test(q=None):
+    # ?which=day tests the daytime targets; default tests the evening ones
     c = _clap_load()
-    ents = _clap_entities(c)
+    which = (q or {}).get("which", [""])[0]
+    ents = _clap_entities(c, "day_entities" if which == "day" else "entities")
     if not ents or not c.get("ha_token"):
         return {"ok": False, "err": "no entity or token"}
     ok = True
@@ -832,7 +840,8 @@ class H(BaseHTTPRequestHandler):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, "application/json", json.dumps(clap_set(q)).encode())
         elif self.path.startswith("/api/clap/test"):
-            self._send(200, "application/json", json.dumps(clap_test()).encode())
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, "application/json", json.dumps(clap_test(q)).encode())
         elif self.path.startswith("/api/clap"):
             self._send(200, "application/json", json.dumps(clap_status()).encode())
         elif self.path.startswith("/api/mictune/set"):
