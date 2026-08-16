@@ -39,7 +39,7 @@ WMO = {0:("☀️","Clear"),1:("\U0001f324️","Mainly clear"),
  99:("⛈️","Thunderstorm")}
 
 def load_wconf():
-    c = {"lat": 44.6701, "lon": -74.9774, "unit": "C", "place": "Potsdam, NY"}
+    c = {"lat": 40.7128, "lon": -74.0060, "unit": "C", "place": "New York, NY"}
     try:
         c.update(json.load(open(WCONF)))
     except Exception:
