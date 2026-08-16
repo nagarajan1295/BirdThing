@@ -19,6 +19,7 @@ Stdlib + python3-dbus + python3-gi only. No internet, no cloud, no app.
 import json
 import os
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -252,11 +253,39 @@ DIAG = {
     # bond (no CTKD) can never deliver a notification no matter how healthy the
     # classic link looks. This is what a silently-useless pairing looks like.
     "bond_le": None,
+    # which transports are actually up. ANCS runs ONLY over LE; a classic-only
+    # link is the silent killer - the phone reads as Connected and nothing can
+    # ever arrive. BlueZ's own Connected flag cannot tell these apart.
+    "transports": {"classic": False, "le": False},
+    "classic_evictions": 0,
     "started": time.time(),
 }
 
 
 # --- BlueZ helpers --------------------------------------------------------
+def link_transports(dev_addr):
+    """Which transports are actually up to this device: (has_classic, has_le).
+
+    `hcitool con` is the only place that distinguishes them - BlueZ's
+    Device1.Connected is a single boolean covering both, which is exactly why
+    this failure was invisible for so long.
+    """
+    try:
+        out = subprocess.run(["hcitool", "con"], capture_output=True,
+                             text=True, timeout=5).stdout
+    except Exception:                                       # noqa: BLE001
+        return (False, False)
+    has_classic = has_le = False
+    for line in out.splitlines():
+        if dev_addr.upper() not in line.upper():
+            continue
+        if line.strip().startswith("LE"):
+            has_le = True
+        elif "ACL" in line:
+            has_classic = True
+    return (has_classic, has_le)
+
+
 def read_bond_quality(adapter_addr, dev_addr):
     """Does this bond carry the LE keys ANCS needs?
 
@@ -954,6 +983,51 @@ def main():
         except Exception as exc:                            # noqa: BLE001
             log("refresh_diag: %s" % exc)
 
+    # --- THE CLASSIC-LINK TRAP ------------------------------------------
+    # ANCS exists ONLY over LE. But this accessory must also offer classic
+    # BR/EDR, because iOS will not list a pure-BLE peripheral in Settings.
+    # The trap: once iOS has a CLASSIC link it considers the device connected
+    # (it even latches on to the Apple iAP accessory UUID) and never opens the
+    # LE link at all. The phone shows as "Connected", the bond is perfect, and
+    # not one notification can arrive.
+    #
+    # Proven on air: with a classic ACL up, `hcitool con` showed only
+    # `ACL ... PERIPHERAL AUTH ENCRYPT` and ServicesResolved stayed false for
+    # hours. Dropping that ACL, changing nothing else, produced an LE link
+    # within 20s, then "ANCS found -> linked -> subscribed" - and it held.
+    #
+    # So: whenever the phone is attached over CLASSIC ONLY and ANCS is not
+    # linked, drop that link. iOS comes straight back over LE. This is only
+    # ever done when there is no LE link to lose.
+    evict = {"at": 0.0}
+    EVICT_MIN_INTERVAL = 20.0
+
+    def evict_classic_only_link():
+        if client.device_path is not None:
+            return                          # ANCS is up, do not touch anything
+        now = time.time()
+        if now - evict["at"] < EVICT_MIN_INTERVAL:
+            return
+        for entry in DIAG.get("bonded", []):
+            if not entry.get("connected"):
+                continue
+            addr = entry["path"].rsplit("dev_", 1)[-1].replace("_", ":")
+            classic, le = link_transports(addr)
+            DIAG["transports"] = {"classic": classic, "le": le}
+            if classic and not le:
+                evict["at"] = now
+                DIAG["classic_evictions"] += 1
+                log("phone is attached over CLASSIC ONLY and ANCS cannot run "
+                    "there - dropping that link so iOS reconnects over LE")
+                try:
+                    dbus.Interface(bus.get_object(BUS_NAME, entry["path"]),
+                                   DEVICE_IFACE).Disconnect(
+                        reply_handler=lambda: None,
+                        error_handler=lambda e: log("disconnect: %s" % e),
+                        timeout=15)
+                except Exception as exc:                    # noqa: BLE001
+                    log("evict failed: %s" % exc)
+
     def keepalive():
         try:
             ensure_advertising()
@@ -966,6 +1040,8 @@ def main():
                 client.scan_existing()
                 try_reconnect()
             refresh_diag()
+            # after refresh_diag, so DIAG["bonded"] reflects reality
+            evict_classic_only_link()
         except Exception as exc:                            # noqa: BLE001
             log("keepalive: %s" % exc)
         return True
@@ -1028,11 +1104,18 @@ class Handler(BaseHTTPRequestHandler):
                                    "and delivers nothing.")
             elif snap["linked"]:
                 diag["verdict"] = "linked - notifications will arrive"
+            elif diag["classic_connected"] and diag["transports"]["classic"] \
+                    and not diag["transports"]["le"]:
+                diag["verdict"] = (
+                    "phone is attached over CLASSIC ONLY - ANCS runs only over "
+                    "LE, so nothing can arrive. iOS treats the classic link as "
+                    "'connected' and never opens LE. The gateway drops that "
+                    "link automatically; it should return over LE within ~30s.")
             elif diag["classic_connected"]:
                 diag["verdict"] = ("phone is connected but ANCS is not attached: "
-                                   "notification access was not granted, or the "
-                                   "link is classic-only. Re-pair and allow "
-                                   "'Share System Notifications'.")
+                                   "notification access was not granted. Enable "
+                                   "'Share System Notifications' under the (i) "
+                                   "next to the device in Settings > Bluetooth.")
             elif not diag["advertising"]:
                 diag["verdict"] = ("NOT advertising - the phone has nothing to "
                                    "reconnect to. See adv_last_error.")
