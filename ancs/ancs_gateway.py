@@ -272,6 +272,11 @@ DIAG = {
     # ever arrive. BlueZ's own Connected flag cannot tell these apart.
     "transports": {"classic": False, "le": False},
     "classic_evictions": 0,
+    # ANCS events received on the current link, and when it came up. A link that
+    # is subscribed but has received NOTHING for minutes means iOS is
+    # withholding - i.e. "Share System Notifications" is off for this device.
+    "events_since_link": 0,
+    "linked_at": 0.0,
     "started": time.time(),
 }
 
@@ -430,6 +435,13 @@ class AncsClient:
         self.ds_buf = bytearray()
         self.pending = deque()    # notification uids awaiting attributes
         self.inflight = None
+        # How many ANCS events the phone has actually sent since this link came
+        # up. Subscribing successfully proves NOTHING: iOS lets a bonded peer
+        # write the CCCD and then withholds every event if notification access
+        # is off for the device. Verified on air - the phone happily sent a
+        # battery-level notification on the same link while sending zero ANCS
+        # events. This counter is the only way to tell the two apart.
+        self.events_since_link = 0
 
     # -- connection lifecycle --
     def scan_existing(self):
@@ -496,6 +508,9 @@ class AncsClient:
             name = str(props.Get(DEVICE_IFACE, "Alias"))
         except Exception:                                   # noqa: BLE001
             pass
+        self.events_since_link = 0
+        DIAG["events_since_link"] = 0
+        DIAG["linked_at"] = time.time()
         STORE.set_link(True, name)
         log("linked to %s" % name)
 
@@ -601,6 +616,8 @@ class AncsClient:
 
     # -- notification source --
     def on_notification_source(self, value):
+        self.events_since_link += 1
+        DIAG["events_since_link"] = self.events_since_link
         data = bytes(value)
         if len(data) < 8:
             return
@@ -1124,6 +1141,18 @@ class Handler(BaseHTTPRequestHandler):
                                    "NOT subscribed - nothing can arrive. This is "
                                    "the silent failure: the link looks healthy "
                                    "and delivers nothing.")
+            elif snap["linked"] and notif_ok                     and diag.get("events_since_link", 0) == 0                     and diag.get("linked_at")                     and (time.time() - diag["linked_at"]) > 300:
+                diag["verdict"] = (
+                    "SUBSCRIBED BUT SILENT for %d min: the link is healthy and "
+                    "the ANCS characteristics are subscribed, yet the phone has "
+                    "sent ZERO notification events. Subscribing proves nothing - "
+                    "iOS accepts it and then withholds every event when "
+                    "notification access is off. FIX ON THE PHONE: Settings > "
+                    "Bluetooth > (i) next to this device > turn ON 'Share System "
+                    "Notifications'. If that switch is not there, Forget This "
+                    "Device, remove the bond here with 'bluetoothctl remove', "
+                    "and pair again - then ALLOW the notifications prompt."
+                    % int((time.time() - diag["linked_at"]) / 60))
             elif snap["linked"]:
                 diag["verdict"] = "linked - notifications will arrive"
             elif diag["classic_connected"] and diag["transports"]["classic"] \
