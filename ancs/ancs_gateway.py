@@ -2,9 +2,8 @@
 """
 ANCS gateway - Apple Notification Center Service consumer.
 
-Runs on the Mac mini (Sentry host), whose Broadcom BT radio is stronger and
-completely unused; it replaces the BirdThing Pi as the phone-facing end. The
-host advertises itself as a BLE peripheral soliciting Apple's ANCS service.
+Runs on the BirdThing Pi (living room). The host advertises itself as a BLE
+peripheral soliciting Apple's ANCS service.
 Once the iPhone pairs and grants notification access, the host becomes a GATT
 client against the phone's ANCS service and receives every notification the
 phone shows - including incoming calls and messages, with sender and body.
@@ -110,7 +109,7 @@ CONFIG_PATH = "/etc/ancs-gateway.json"
 DEFAULT_CONFIG = {
     "port": 8099,
     "adapter": "hci0",
-    "local_name": "BirdThing Hub",
+    "local_name": "BirdThing",
     "keep": 40,            # ring buffer size
     "expire_sec": 240,     # how long a notification stays "fresh" for toasts
     "redact_body": False,  # True = send sender only, never the message text
@@ -795,8 +794,16 @@ def main():
         signal_name="PropertiesChanged", path_keyword="path")
 
     def on_iface_added(path, ifaces):
-        if DEVICE_IFACE in ifaces:
-            log("device appeared: %s" % path)
+        # SPAM-QUIET: this fired for EVERY BLE device the background scan saw -
+        # thousands of lines an hour of random phones, watches and beacons. It
+        # flooded journald so hard that the log rotated away the only history
+        # that mattered (which notifications actually arrived, and when the
+        # link came and went). Only mention devices we are actually bonded to.
+        if DEVICE_IFACE not in ifaces:
+            return
+        dev = ifaces[DEVICE_IFACE]
+        if dev.get("Paired") or dev.get("Bonded"):
+            log("bonded device appeared: %s" % path)
 
     bus.add_signal_receiver(on_iface_added, dbus_interface=DBUS_OM_IFACE,
                             signal_name="InterfacesAdded")

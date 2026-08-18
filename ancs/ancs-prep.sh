@@ -1,11 +1,10 @@
 #!/bin/bash
-# Prepare hci0 on the Mac mini for ANCS, and assert it on every boot.
+# Prepare hci0 on the BirdThing Pi for ANCS, and assert it on every boot.
 #
-# This host replaced the BirdThing Pi as the phone-facing end: its Broadcom
-# BCM20702 (Apple 05ac:8289, HCI 4.0) is a dedicated USB radio with the Mac's
-# own antenna, rather than the Pi's SoC radio sharing a PCB antenna with WiFi,
-# and it starts with ZERO existing bonds - so none of the Pi's address-clash
-# mitigations (it spoofs the bedroom Pi's BD address) apply here at all.
+# The gateway briefly ran on the Mac mini and was moved back: the mini sits in
+# the wrong room (BLE is ~10m) and, being a desktop, advertised itself as a
+# COMPUTER - which stops iOS offering notification sharing at all. This Pi is
+# where the user actually is.
 #
 # WHY DUAL MODE, not LE-only:
 #   ANCS itself is pure BLE, but iOS will not list a pure-BLE peripheral in
@@ -143,4 +142,36 @@ for flag in br/edr ssp connectable bondable le; do
         *) log "WARNING: '$flag' missing - iPhone pairing/auto-reconnect will fail" ;;
     esac
 done
+
+# =====================================================================
+# LE CONNECTION PARAMETERS - why the link kept dying after 2-3 seconds
+# =====================================================================
+# This Pi ends up as the CENTRAL for the ANCS link, so IT chooses the
+# connection parameters - and BlueZ's defaults are far too aggressive for a
+# link across a room:
+#
+#   supervision_timeout = 42  ->  420 ms
+#
+# At a 48.75 ms connection interval that means missing about NINE connection
+# events kills the link. Captured on air as a stream of
+#   Disconnect Complete ... Reason: Connection Failed to be Established (0x3e)
+# every 2-3 seconds whenever the phone was at normal room distance
+# (RSSI -84 to -87), which is why notifications "worked for a few minutes"
+# and then never again.
+#
+# 500 = 5000 ms lets the link ride out five seconds of bad RF instead of
+# four hundred milliseconds. debugfs does NOT persist, so assert it on boot.
+LE_SUPERVISION_TIMEOUT="${LE_SUPERVISION_TIMEOUT:-500}"
+DBG=/sys/kernel/debug/bluetooth/$ADAPTER
+if [ -w "$DBG/supervision_timeout" ]; then
+    echo "$LE_SUPERVISION_TIMEOUT" > "$DBG/supervision_timeout" 2>/dev/null
+    echo 24 > "$DBG/conn_min_interval" 2>/dev/null
+    echo 40 > "$DBG/conn_max_interval" 2>/dev/null
+    echo 0  > "$DBG/conn_latency"      2>/dev/null
+    log "LE supervision timeout: $(cat "$DBG/supervision_timeout")0 ms"
+else
+    log "WARNING: $DBG/supervision_timeout not writable - the LE link will use"
+    log "         BlueZ's 420ms default and will drop on any weak signal"
+fi
+
 log "done"
