@@ -93,8 +93,56 @@ settings() { script -qec "btmgmt --index $ADAPTER info" /dev/null 2>/dev/null \
 #   bondable:    the mini boots without it (verified: current settings were
 #                just "powered ssp br/edr le secure-conn"), so pairing would
 #                fail before this script existed.
+# Honour ControllerMode: when main.conf asks for LE-only this script must NOT
+# turn BR/EDR back on. It did, silently, which made an LE-only test meaningless
+# (current settings still read "br/edr" while main.conf said le).
+#
+# Classic is only ever needed to PAIR - iOS will not list a pure-BLE peripheral
+# in Settings. Once the bond carries LE keys, classic is pure liability: iOS
+# grabs the classic link, treats the device as connected, and never opens the
+# LE link that ANCS requires.
+# AUTO-MODE: classic is needed ONLY to pair. Once a bond exists that carries LE
+# keys, classic is pure liability - iOS grabs the classic link, treats the phone
+# as connected, and never opens the LE link ANCS requires. That single behaviour
+# caused this outage three separate times.
+#
+# So: bond with LE keys -> LE ONLY.  No such bond -> DUAL, so pairing works.
+# This flips itself, which means losing the bond can never lock anyone out.
+BOND_LE=0
+for inf in /var/lib/bluetooth/*/*/info; do
+    [ -f "$inf" ] || continue
+    if grep -q 'SupportedTechnologies=.*LE' "$inf" 2>/dev/null        && grep -q 'PeripheralLongTermKey\|LongTermKey' "$inf" 2>/dev/null; then
+        BOND_LE=1
+        break
+    fi
+done
+
+WANT_MODE=dual
+[ "$BOND_LE" = "1" ] && WANT_MODE=le
+if ! grep -qE "^\s*ControllerMode\s*=\s*$WANT_MODE\s*$" /etc/bluetooth/main.conf 2>/dev/null; then
+    log "no LE bond yet - switching to DUAL so the phone can pair" 
+    [ "$WANT_MODE" = "le" ] && log "LE bond present - switching to LE ONLY (classic steals the ANCS link)"
+    sed -i "s/^\s*ControllerMode\s*=.*/ControllerMode = $WANT_MODE/" /etc/bluetooth/main.conf
+    systemctl restart bluetooth
+    sleep 5
+fi
+
+LE_ONLY=0
+if [ "$WANT_MODE" = "le" ]; then
+    LE_ONLY=1
+    log "ControllerMode=le - classic will be disabled (pairing needs dual; flip main.conf back to re-pair)"
+    mgmt power off
+    mgmt bredr off
+    mgmt le on
+    mgmt power on
+    sleep 2
+fi
+
+REQUIRED_FLAGS="br/edr ssp connectable bondable"
+[ "$LE_ONLY" = "1" ] && REQUIRED_FLAGS="connectable bondable le"
+
 need=""
-for flag in br/edr ssp connectable bondable; do
+for flag in $REQUIRED_FLAGS; do
     case "$(settings)" in
         *"$flag"*) ;;
         *) need="$need $flag" ;;
@@ -104,7 +152,7 @@ done
 if [ -n "$need" ]; then
     log "asserting:$need"
     mgmt power off
-    mgmt bredr on
+    [ "$LE_ONLY" = "1" ] || mgmt bredr on
     mgmt ssp on
     mgmt connectable on
     mgmt bondable on
@@ -136,7 +184,7 @@ log "class: $(hciconfig -a "$ADAPTER" 2>/dev/null | grep -m1 'Class:')"
 
 log "$(settings)"
 s="$(settings)"
-for flag in br/edr ssp connectable bondable le; do
+for flag in $REQUIRED_FLAGS; do
     case "$s" in
         *"$flag"*) ;;
         *) log "WARNING: '$flag' missing - iPhone pairing/auto-reconnect will fail" ;;

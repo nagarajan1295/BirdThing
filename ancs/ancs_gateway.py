@@ -51,6 +51,13 @@ AGENT_PATH = "/org/birdthing/ancs/agent"
 # BlueZ runs one ATT operation at a time per connection, so a StartNotify
 # issued while another is outstanding comes back InProgress. Retry that one
 # characteristic after a short pause rather than restarting the whole attach.
+# One stalled attribute fetch used to poison every later notification: pump()
+# refuses to send while `inflight` is set, and nothing ever cleared it if the
+# Data Source reply never completed. Symptom the user hit exactly: the first
+# notification arrives, every one after it is silent, and none of them carry a
+# sender or body.
+ATTR_TIMEOUT_S = 6.0
+
 SUBSCRIBE_RETRY_MS = 700
 SUBSCRIBE_MAX_TRIES = 6
 VERIFY_MAX_ROUNDS = 4
@@ -69,6 +76,19 @@ CATEGORIES = {
     4: "Social", 5: "Schedule", 6: "Email", 7: "News",
     8: "HealthAndFitness", 9: "BusinessAndFinance", 10: "Location",
     11: "Entertainment",
+}
+
+# Shown when the phone never returns the attributes. A bare "notification"
+# with no sender tells the user nothing; the category alone is always known
+# because it rides in the Notification Source event itself.
+CATEGORY_FALLBACK = {
+    "IncomingCall": ("Phone", "Incoming call"),
+    "MissedCall": ("Phone", "Missed call"),
+    "Voicemail": ("Phone", "Voicemail"),
+    "Social": ("Messages", "New message"),
+    "Email": ("Mail", "New email"),
+    "Schedule": ("Calendar", "Reminder"),
+    "News": ("News", "New story"),
 }
 
 ATTR_APP_ID, ATTR_TITLE, ATTR_SUBTITLE, ATTR_MESSAGE = 0, 1, 2, 3
@@ -435,6 +455,8 @@ class AncsClient:
         self.ds_buf = bytearray()
         self.pending = deque()    # notification uids awaiting attributes
         self.inflight = None
+        self.inflight_since = 0.0
+        self._chrcs = {}
         # How many ANCS events the phone has actually sent since this link came
         # up. Subscribing successfully proves NOTHING: iOS lets a bonded peer
         # write the CCCD and then withholds every event if notification access
@@ -472,6 +494,27 @@ class AncsClient:
         if NOTIFICATION_SOURCE not in chrcs or DATA_SOURCE not in chrcs:
             return  # not an ANCS provider, or notification access not granted yet
 
+        # LE-TRANSPORT-GUARD: BlueZ keeps the phone's GATT objects cached, so
+        # these characteristics are visible even when the only live connection
+        # is CLASSIC. Attaching then produces a confident "ANCS found ->
+        # linked" for a link that cannot carry ANCS at all, every subscribe
+        # fails, and the logs blame the wrong thing. Verified on air: three
+        # such "links" in 150s with zero LE connections and zero ATT packets.
+        addr = str(device_path).rsplit("dev_", 1)[-1].replace("_", ":")
+        classic, le = link_transports(addr)
+        if classic and not le:
+            log("phone is on CLASSIC only - ANCS cannot run there, not "
+                "attaching (dropping the link so iOS comes back over LE)")
+            try:
+                dbus.Interface(self.bus.get_object(BUS_NAME, device_path),
+                               DEVICE_IFACE).Disconnect(
+                    reply_handler=lambda: None,
+                    error_handler=lambda e: log("disconnect: %s" % e),
+                    timeout=15)
+            except Exception as exc:                        # noqa: BLE001
+                log("evict on attach failed: %s" % exc)
+            return
+
         log("ANCS found on %s - subscribing" % device_path)
         self.device_path = device_path
         self.ds_buf = bytearray()
@@ -499,6 +542,7 @@ class AncsClient:
         # error into a total outage (the gateway gave up entirely and no
         # notification could arrive at all). The chain self-heals in the
         # background and reports the truth via /api/status.
+        self._chrcs = chrcs
         self._subscribe_chain(chrcs)
 
         name = "phone"
@@ -665,6 +709,14 @@ class AncsClient:
     def request_attributes(self, uid):
         if self.cp is None:
             return
+        # Asking before Data Source is subscribed guarantees a reply we can
+        # never hear, which then times out and delays everything behind it.
+        ds = self._chrcs.get(DATA_SOURCE) if self._chrcs else None
+        if ds is not None and not self._notifying(ds):
+            log("data source not subscribed - attributes will be unavailable "
+                "for uid %s" % uid)
+            self._fallback_label(uid)
+            return
         self.pending.append(uid)
         self.pump()
 
@@ -675,6 +727,9 @@ class AncsClient:
             return
         uid = self.pending.popleft()
         self.inflight = uid
+        self.inflight_since = time.time()
+        GLib.timeout_add(int(ATTR_TIMEOUT_S * 1000),
+                         lambda u=uid: (self._attr_timeout(u), False)[1])
         payload = bytearray([0x00])                 # CommandID: GetNotificationAttributes
         payload += struct.pack("<I", uid)
         for attr, maxlen in REQUESTED:
@@ -693,6 +748,35 @@ class AncsClient:
     def _retry(self):
         self.pump()
         return False
+
+    def _attr_timeout(self, uid):
+        """The phone never finished answering for this notification.
+
+        Without this the whole attribute pipeline wedges: pump() will not send
+        another request while `inflight` is set, so ONE unanswered reply
+        silences every notification that follows. Clear it, give the
+        notification a category-based label so it is not a blank toast, and
+        keep going.
+        """
+        if self.inflight != uid:
+            return                      # already answered, nothing to do
+        log("no attributes for uid %s after %.0fs - continuing without them"
+            % (uid, ATTR_TIMEOUT_S))
+        self.inflight = None
+        self.ds_buf = bytearray()       # a half-received reply would corrupt the next
+        self._fallback_label(uid)
+        self.pump()
+
+    def _fallback_label(self, uid):
+        snap = STORE.snapshot(50)
+        for item in snap["items"]:
+            if item["uid"] != uid or item.get("complete"):
+                continue
+            app, title = CATEGORY_FALLBACK.get(
+                item.get("cat", "Other"), ("Phone", "Notification"))
+            STORE.add({"uid": uid, "app": app, "title": title,
+                       "complete": False})
+            break
 
     # -- data source --
     def on_data_source(self, value):
@@ -810,6 +894,11 @@ def main():
         elif interface == DEVICE_IFACE:
             if changed.get("ServicesResolved"):
                 GLib.timeout_add(300, lambda: (client.try_attach(path), False)[1])
+            elif "Connected" in changed and changed["Connected"]:
+                # A classic-only link lasts 2-4s before iOS gives up on it, so
+                # the 30s keepalive sweep almost never caught it. React now.
+                GLib.timeout_add(
+                    1500, lambda p=path: (evict_classic_only_link(), False)[1])
             elif "Connected" in changed and not changed["Connected"]:
                 client.detach(path)
             elif changed.get("Paired"):
@@ -865,7 +954,7 @@ def main():
     # phone has something to offer) - rate-limited so it cannot flood the log
     # or keep the controller busy paging a phone that is out of range.
     reconnect_fail = {}
-    RECONNECT_MIN_INTERVAL = 300.0      # seconds between attempts per device
+    RECONNECT_MIN_INTERVAL = 45.0      # seconds between attempts per device
 
     def try_reconnect():
         if client.device_path is not None:
@@ -1059,7 +1148,7 @@ def main():
     # linked, drop that link. iOS comes straight back over LE. This is only
     # ever done when there is no LE link to lose.
     evict = {"at": 0.0}
-    EVICT_MIN_INTERVAL = 20.0
+    EVICT_MIN_INTERVAL = 8.0
 
     def evict_classic_only_link():
         if client.device_path is not None:
@@ -1067,7 +1156,18 @@ def main():
         now = time.time()
         if now - evict["at"] < EVICT_MIN_INTERVAL:
             return
-        for entry in DIAG.get("bonded", []):
+        bonded = DIAG.get("bonded") or []
+        if not bonded:
+            # called straight from the Connected signal, before refresh_diag
+            try:
+                for pth, ifaces in get_managed_objects(bus).items():
+                    dev = ifaces.get(DEVICE_IFACE)
+                    if dev and dev.get("Paired") and dev.get("Connected"):
+                        bonded = [{"path": str(pth), "connected": True}]
+                        break
+            except Exception:                               # noqa: BLE001
+                return
+        for entry in bonded:
             if not entry.get("connected"):
                 continue
             addr = entry["path"].rsplit("dev_", 1)[-1].replace("_", ":")
@@ -1097,7 +1197,17 @@ def main():
                 props.Set(ADAPTER_IFACE, "Pairable", dbus.Boolean(True))
             if client.device_path is None:
                 client.scan_existing()
-                # try_reconnect() REMOVED - see the note above its definition.
+                # LE-TRIGGER: call this even though it reports a BR/EDR error.
+                #
+                # Removing it looked right - it had never "succeeded" once. But
+                # the on-air capture shows the LE connections come up with
+                # Role: Central, i.e. THIS host initiates them, and with the
+                # call removed the phone sat at RSSI -65 without linking at all.
+                # BlueZ answers br-connection-profile-unavailable for the
+                # classic half while still arming the kernel's LE auto-connect,
+                # so the error is noise and the side effect is the point.
+                # Rate-limited, and skipped entirely while a link is up.
+                try_reconnect()
             refresh_diag()
             # after refresh_diag, so DIAG["bonded"] reflects reality
             evict_classic_only_link()
