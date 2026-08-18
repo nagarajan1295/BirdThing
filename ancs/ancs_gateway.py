@@ -165,6 +165,15 @@ class Store:
         self._lock = threading.Lock()
         self._items = deque(maxlen=keep)
         self._by_uid = {}
+        # DISPLAY-UID: ANCS notification UIDs are small integers assigned by the
+        # phone and they RESTART AND REPEAT after every reconnect - uid 9 has
+        # been served many times over. The display widget dedupes by uid
+        # (`seen[n.uid]`), so a brand-new message that happens to reuse an old
+        # uid is treated as one the screen already showed and is silently never
+        # displayed. That is the real "it worked once, then never again".
+        # Serve a monotonic id instead; the ANCS uid stays for EVT_REMOVED
+        # matching and is still exposed as ancs_uid.
+        self._seq = int(time.time() * 1000)
         self.linked = False        # phone connected and ANCS subscribed
         self.device = ""
         self.since = 0.0
@@ -175,6 +184,8 @@ class Store:
             if old is not None:
                 old.update(item)
                 return old
+            self._seq += 1
+            item["disp_uid"] = self._seq
             self._items.append(item)
             self._by_uid[item["uid"]] = item
             # deque eviction leaves stale uid keys behind; prune them
@@ -246,6 +257,10 @@ class Store:
         for i in items:
             i["age"] = round(now - i["ts"], 1)
             i["fresh"] = (now - i["ts"]) < CFG["expire_sec"]
+            # what the display dedupes on must be unique for all time
+            if "disp_uid" in i:
+                i["ancs_uid"] = i["uid"]
+                i["uid"] = i["disp_uid"]
         return {
             "ok": True,
             "now": now,
