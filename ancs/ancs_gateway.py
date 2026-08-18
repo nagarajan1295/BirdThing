@@ -539,6 +539,15 @@ class AncsClient:
         than restarting the whole attach. Success is judged by the `Notifying`
         property, never by the absence of an exception.
         """
+        # SELF-HARM-FIX: stop the moment the phone is no longer attached.
+        # Observed: the phone disconnected 3s into a link and this chain kept
+        # issuing StartNotify against the dead device for another 45 seconds,
+        # collecting InProgress every time and logging four "healing" rounds
+        # that could never succeed. Pointless work, misleading logs, and it
+        # keeps the adapter busy exactly when it should be advertising for the
+        # phone to come back.
+        if self.device_path is None:
+            return
         if order is None:
             # data source first: it must be listening before any control-point
             # request goes out, or the reply is missed
@@ -582,6 +591,8 @@ class AncsClient:
 
     def _verify_notifying(self, chrcs, round_=0):
         """Report what actually ended up subscribed, and heal it if not."""
+        if self.device_path is None:
+            return          # phone gone - nothing to verify or heal
         ns = self._notifying(chrcs[NOTIFICATION_SOURCE])
         ds = self._notifying(chrcs[DATA_SOURCE])
         DIAG["notifying"] = {"notification_source": ns, "data_source": ds}
@@ -827,7 +838,16 @@ def main():
 
     client.scan_existing()
 
-    # RECONNECT: iOS is the side that has to re-establish the ANCS link.
+    # RECONNECT: iOS is the side that has to re-establish the ANCS link, and
+    # this host does NOT poke it. Device1.Connect() was called here for months.
+    # It NEVER once succeeded - every single attempt died with
+    # br-connection-profile-unavailable, because BlueZ routes Connect() over
+    # BR/EDR for a dual-mode bond and the iPhone offers no classic profile we
+    # want. Worse than useless: one of those attempts was seen firing at the
+    # exact moment an LE link came up, which then died three seconds later.
+    # The connectable ANCS advertisement is the only reconnect mechanism that
+    # has ever worked, so it is now the only one.
+    # RECONNECT (historical): iOS is the side that has to re-establish the link.
     #
     # The Pi version paged bonded phones itself every 30s with Device1.Connect()
     # and that is why it never came back on its own. For a DUAL-mode bond (which
@@ -1077,7 +1097,7 @@ def main():
                 props.Set(ADAPTER_IFACE, "Pairable", dbus.Boolean(True))
             if client.device_path is None:
                 client.scan_existing()
-                try_reconnect()
+                # try_reconnect() REMOVED - see the note above its definition.
             refresh_diag()
             # after refresh_diag, so DIAG["bonded"] reflects reality
             evict_classic_only_link()
