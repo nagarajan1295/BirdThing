@@ -125,6 +125,50 @@ APP_NAMES = {
     "com.ubercab.UberClient": "Uber",
 }
 
+# --- central display settings ---------------------------------------------
+# These are deliberately SERVER-side, not per-screen localStorage: the point is
+# that one place (the BirdThing settings screen) controls every display. All
+# three already poll this gateway, so the settings ride along in the same
+# response they are already fetching - no extra requests, no extra plumbing.
+SETTINGS_PATH = "/etc/ancs-settings.json"
+DEFAULT_SETTINGS = {
+    "hold_seconds": 6,          # how long a toast stays on screen
+    "show_body": True,          # False = sender only, never the message text
+    "devices": {                # per-screen on/off
+        "birdthing": True,      # the BirdThing dashboard (Car Thing)
+        "weatherthing": True,   # the bedroom Car Thing
+        "kiosk": True,          # the bedroom weather-station kiosk
+    },
+}
+
+
+def load_settings():
+    st = json.loads(json.dumps(DEFAULT_SETTINGS))   # deep copy
+    try:
+        with open(SETTINGS_PATH) as fh:
+            disk = json.load(fh)
+        for k, v in disk.items():
+            if k == "devices" and isinstance(v, dict):
+                st["devices"].update({dk: bool(dv) for dk, dv in v.items()})
+            elif k in st:
+                st[k] = v
+    except FileNotFoundError:
+        pass
+    except Exception as exc:                                # noqa: BLE001
+        log("settings error, using defaults: %s" % exc)
+    return st
+
+
+def save_settings(st):
+    tmp = SETTINGS_PATH + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(st, fh, indent=2)
+    os.replace(tmp, SETTINGS_PATH)     # atomic; a torn file would reset settings
+
+
+SETTINGS = None      # populated at import-time end
+
+
 CONFIG_PATH = "/etc/ancs-gateway.json"
 DEFAULT_CONFIG = {
     "port": 8099,
@@ -150,6 +194,7 @@ def load_config():
 
 
 CFG = load_config()
+SETTINGS = load_settings()
 
 
 def log(msg):
@@ -250,7 +295,10 @@ class Store:
         with self._lock:
             items = [dict(i) for i in reversed(self._items)][:limit]
             linked, device, since = self.linked, self.device, self.since
-        if CFG["redact_body"]:
+        # show_body is the user-facing toggle; redact_body is the older config
+        # switch. Either one hides the text, and it is done HERE rather than in
+        # the browser so the message never reaches the screens at all.
+        if CFG["redact_body"] or not SETTINGS.get("show_body", True):
             for i in items:
                 i["message"] = ""
                 i["redacted"] = True
@@ -264,6 +312,7 @@ class Store:
         return {
             "ok": True,
             "now": now,
+            "settings": SETTINGS,   # every display reads its config from here
             "linked": linked,
             "device": device,
             "linked_since": since,
@@ -1271,6 +1320,34 @@ class Handler(BaseHTTPRequestHandler):
             self._send(STORE.snapshot())
         elif path == "/healthz":
             self._send({"ok": True, "linked": STORE.linked})
+        elif path == "/api/settings/set":
+            from urllib.parse import parse_qs
+            q = parse_qs(parts[1] if len(parts) > 1 else "")
+            st = dict(SETTINGS)
+            st["devices"] = dict(SETTINGS.get("devices", {}))
+            if "hold" in q:
+                try:
+                    st["hold_seconds"] = max(2, min(60, int(float(q["hold"][0]))))
+                except Exception:                           # noqa: BLE001
+                    pass
+            if "show_body" in q:
+                st["show_body"] = q["show_body"][0] not in ("0", "false", "no")
+            for dev in ("birdthing", "weatherthing", "kiosk"):
+                key = "dev_" + dev
+                if key in q:
+                    st["devices"][dev] = q[key][0] not in ("0", "false", "no")
+            try:
+                save_settings(st)
+                SETTINGS.clear()
+                SETTINGS.update(st)
+                log("settings updated: hold=%ss show_body=%s devices=%s"
+                    % (st["hold_seconds"], st["show_body"], st["devices"]))
+            except Exception as exc:                        # noqa: BLE001
+                self._send({"ok": False, "error": str(exc)}, 500)
+                return
+            self._send({"ok": True, "settings": SETTINGS})
+        elif path == "/api/settings":
+            self._send({"ok": True, "settings": SETTINGS})
         elif path == "/api/status":
             snap = STORE.snapshot(1)
             diag = dict(DIAG)

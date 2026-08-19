@@ -31,7 +31,10 @@ def main():
         return 2
     html_path, widget_path, ancs_url = sys.argv[1], sys.argv[2], sys.argv[3]
 
-    keys = {"theme": "ANCS_THEME", "style": "ANCS_STYLE", "fs": "ANCS_FS",
+    # device: which screen this is, so the central per-display on/off switch
+    # (set from the BirdThing settings panel) can address it.
+    keys = {"device": "ANCS_DEVICE",
+            "theme": "ANCS_THEME", "style": "ANCS_STYLE", "fs": "ANCS_FS",
             "hold_ms": "ANCS_HOLD_MS", "call_hold_ms": "ANCS_CALL_HOLD_MS",
             "poll_ms": "ANCS_POLL_MS"}
     opts = {}
