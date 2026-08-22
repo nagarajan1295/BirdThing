@@ -607,7 +607,9 @@ class AncsClient:
         # notification could arrive at all). The chain self-heals in the
         # background and reports the truth via /api/status.
         self._chrcs = chrcs
-        self._subscribe_chain(chrcs)
+        # a reconnect must re-arm the phone's CCCD, not assume it survived
+        self._force_unsubscribe(chrcs)
+        self._subscribe_chain(chrcs, force=True)
 
         name = "phone"
         try:
@@ -632,7 +634,36 @@ class AncsClient:
         except Exception:                                   # noqa: BLE001
             return False
 
-    def _subscribe_chain(self, chrcs, order=None, tries=0, verify_round=0):
+    def _force_unsubscribe(self, chrcs):
+        """FORCE-RESUBSCRIBE: clear BlueZ's cached notify state before attaching.
+
+        THE BUG THIS FIXES - the "worked for days, then silent forever" one.
+        BlueZ remembers Notifying=true for a characteristic across a reconnect,
+        but iOS RESETS its CCCD when the link drops. _subscribe_chain then sees
+        Notifying=true, skips the StartNotify as redundant, and the CCCD is
+        never written on the new link. Result: the gateway reports
+        notification_source=true, /api/status says "linked", and the phone
+        sends nothing at all - forever, until something restarts.
+
+        Proven on air: 200s on an established, "subscribed" link produced ZERO
+        ATT Write Requests (no CCCD write ever happened) while the phone was
+        still sending Handle Value Notifications on other characteristics.
+
+        StopNotify first makes the state honest, so the chain really writes it.
+        """
+        for uuid in (DATA_SOURCE, NOTIFICATION_SOURCE):
+            path = chrcs.get(uuid)
+            if not path or not self._notifying(path):
+                continue
+            try:
+                dbus.Interface(self.bus.get_object(BUS_NAME, path),
+                               GATT_CHRC_IFACE).StopNotify()
+                log("cleared stale notify state on %s" % uuid[:8])
+            except Exception as exc:                        # noqa: BLE001
+                log("StopNotify (%s) ignored: %s" % (uuid[:8], exc))
+
+    def _subscribe_chain(self, chrcs, order=None, tries=0, verify_round=0,
+                         force=False):
         """StartNotify on the ANCS characteristics ONE AT A TIME.
 
         THE BUG THIS FIXES: BlueZ processes one ATT operation at a time per
@@ -668,17 +699,30 @@ class AncsClient:
 
         uuid, rest = order[0], order[1:]
         path = chrcs.get(uuid)
-        if path is None or self._notifying(path):
-            self._subscribe_chain(chrcs, rest, verify_round=verify_round)
+        # NEVER trust the Notifying property on a fresh attach. BlueZ reports
+        # Notifying=true while this client holds NO notify session at all
+        # (proved on air: StopNotify answered "No notify session started" for
+        # both characteristics while the property read true). Skipping
+        # StartNotify on that basis is what left the phone unsubscribed and the
+        # gateway silently confident - for days at a time.
+        if path is None:
+            self._subscribe_chain(chrcs, rest, verify_round=verify_round,
+                                  force=force)
+            return
+        if not force and self._notifying(path):
+            self._subscribe_chain(chrcs, rest, verify_round=verify_round,
+                                  force=force)
             return
 
         def ok():
-            self._subscribe_chain(chrcs, rest, verify_round=verify_round)
+            self._subscribe_chain(chrcs, rest, verify_round=verify_round,
+                                  force=force)
 
         def err(exc):
             s = str(exc)
             if "Already" in s:
-                self._subscribe_chain(chrcs, rest, verify_round=verify_round)
+                self._subscribe_chain(chrcs, rest, verify_round=verify_round,
+                                      force=force)
             elif "InProgress" in s and tries < SUBSCRIBE_MAX_TRIES:
                 # let the in-flight operation finish, then retry THIS one only
                 GLib.timeout_add(
@@ -687,7 +731,8 @@ class AncsClient:
                                                    verify_round), False)[1])
             else:
                 log("StartNotify failed for %s: %s" % (uuid, exc))
-                self._subscribe_chain(chrcs, rest, verify_round=verify_round)
+                self._subscribe_chain(chrcs, rest, verify_round=verify_round,
+                                      force=force)
 
         try:
             dbus.Interface(self.bus.get_object(BUS_NAME, path),
@@ -695,7 +740,8 @@ class AncsClient:
                                reply_handler=ok, error_handler=err)
         except Exception as exc:                            # noqa: BLE001
             log("StartNotify dispatch failed for %s: %s" % (uuid, exc))
-            self._subscribe_chain(chrcs, rest, verify_round=verify_round)
+            self._subscribe_chain(chrcs, rest, verify_round=verify_round,
+                                  force=force)
 
     def _verify_notifying(self, chrcs, round_=0):
         """Report what actually ended up subscribed, and heal it if not."""
@@ -1365,15 +1411,15 @@ class Handler(BaseHTTPRequestHandler):
                                    "and delivers nothing.")
             elif snap["linked"] and notif_ok                     and diag.get("events_since_link", 0) == 0                     and diag.get("linked_at")                     and (time.time() - diag["linked_at"]) > 300:
                 diag["verdict"] = (
-                    "SUBSCRIBED BUT SILENT for %d min: the link is healthy and "
-                    "the ANCS characteristics are subscribed, yet the phone has "
-                    "sent ZERO notification events. Subscribing proves nothing - "
-                    "iOS accepts it and then withholds every event when "
-                    "notification access is off. FIX ON THE PHONE: Settings > "
-                    "Bluetooth > (i) next to this device > turn ON 'Share System "
-                    "Notifications'. If that switch is not there, Forget This "
-                    "Device, remove the bond here with 'bluetoothctl remove', "
-                    "and pair again - then ALLOW the notifications prompt."
+                    "SUBSCRIBED BUT SILENT for %d min. Most likely a STALE "
+                    "SUBSCRIPTION: BlueZ reports Notifying=true while holding "
+                    "no notify session, so the CCCD was never written on this "
+                    "link and the phone sends nothing. The gateway now forces a "
+                    "StartNotify on every attach, so this should self-clear on "
+                    "the next reconnect; 'systemctl restart ancs-gateway' forces "
+                    "it now. Do NOT assume the iOS notification permission is "
+                    "off - that was wrong twice; check it only if a forced "
+                    "re-subscribe still yields nothing."
                     % int((time.time() - diag["linked_at"]) / 60))
             elif snap["linked"]:
                 diag["verdict"] = "linked - notifications will arrive"
