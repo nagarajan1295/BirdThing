@@ -35,11 +35,34 @@ echo "$(date '+%F %T') linked=$linked notifying=$nsrc advertising=$advert rssi=$
 # keep the health log bounded
 tail -n 20000 "$HEALTH" > "$HEALTH.tmp" 2>/dev/null && mv "$HEALTH.tmp" "$HEALTH"
 
+last_action_silent=$(cat "$STATE/last_silent" 2>/dev/null || echo 0)
+
 # nothing bonded => nothing to repair, the phone simply has not been paired
 [ -z "$bonded" ] && { rm -f "$STATE/down_since"; exit 0; }
 
 if [ "$linked" = "true" ] && [ "$nsrc" = "true" ]; then
     rm -f "$STATE/down_since" "$STATE/escalation"
+
+    # SILENT-LINK: healthy-looking but delivering nothing.
+    # This is the failure that kept coming back - BlueZ reports Notifying=true
+    # while holding no notify session, so the CCCD was never written and the
+    # phone sends nothing, forever. The gateway now forces a re-subscribe on
+    # every attach so it should not recur, but it recurred often enough to be
+    # worth a backstop the watchdog can actually see. A restart re-attaches and
+    # re-subscribes in ~10s.
+    #
+    # 90 minutes is deliberately long: a genuinely quiet stretch (overnight) is
+    # normal and must not cause hourly churn.
+    events=$(echo "$status" | grep -o '"events_since_link": [0-9]*' | awk '{print $2}')
+    linked_at=$(echo "$status" | grep -o '"linked_at": [0-9.]*' | awk '{print $2}' | cut -d. -f1)
+    if [ -n "$events" ] && [ "$events" = "0" ] && [ -n "$linked_at" ] && [ "$linked_at" != "0" ]; then
+        age=$(( now - linked_at ))
+        if [ "$age" -gt 5400 ] && [ $(( now - last_action_silent )) -gt 5400 ]; then
+            log "linked ${age}s with ZERO events - forcing a re-subscribe (restart)"
+            systemctl restart ancs-gateway
+            echo "$now" > "$STATE/last_silent"
+        fi
+    fi
     exit 0
 fi
 
@@ -52,6 +75,7 @@ down_since=$(cat "$STATE/down_since")
 down=$(( now - down_since ))
 esc=$(cat "$STATE/escalation" 2>/dev/null || echo 0)
 last_action=$(cat "$STATE/last_action" 2>/dev/null || echo 0)
+last_action_silent=$(cat "$STATE/last_silent" 2>/dev/null || echo 0)
 
 # never act more than once every 4 minutes
 [ $(( now - last_action )) -lt 240 ] && exit 0
