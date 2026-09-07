@@ -99,8 +99,11 @@
     background:#ff3b30;color:#fff;font:600 .62em/.95em 'Inter',system-ui,sans-serif;
     text-align:center;display:none;}
   #ancsStat.has-badge .badge{display:block;}
+  /* fixed-corner fallback: no host status row to inherit a colour from, and
+     the page may be light OR dark - mid-grey at half opacity reads on both */
   #ancsStat.fixed{position:fixed;z-index:180;width:20px;height:20px;
-    font-size:16px;opacity:.32;}
+    font-size:16px;color:#8a8a8e!important;opacity:.5;}
+  #ancsStat.fixed.linked{opacity:.95;}
   #ancsStat.fixed.tr{top:5px;right:6px;}
   #ancsStat.fixed.tl{top:5px;left:6px;}
   #ancsStat.fixed.br{bottom:5px;right:6px;}
@@ -172,7 +175,10 @@
     }
     statEl = document.createElement('span');
     statEl.id = 'ancsStat';
-    if (window.ANCS_THEME === 'light') statEl.style.color = '#1c1c1e';
+    // inherit the host status row's colour when slotted in; when slotted into a
+    // light page that has no body.light, force a dark glyph. The fixed-corner
+    // fallback ignores this (its CSS pins a mid-grey that works on any bg).
+    if (host && window.ANCS_THEME === 'light') statEl.style.color = '#1c1c1e';
     // phone outline + a slash line that hides when linked
     statEl.innerHTML =
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
