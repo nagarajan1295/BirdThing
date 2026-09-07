@@ -131,11 +131,28 @@ LE_ONLY=0
 if [ "$WANT_MODE" = "le" ]; then
     LE_ONLY=1
     log "ControllerMode=le - classic will be disabled (pairing needs dual; flip main.conf back to re-pair)"
-    mgmt power off
-    mgmt bredr off
-    mgmt le on
-    mgmt power on
-    sleep 2
+    # btmgmt bredr-off is RACY on a freshly-started controller (the tty/timing
+    # gotcha) and bluetoothd on this BlueZ build does NOT reliably honour
+    # ControllerMode=le from main.conf on its own - verified live: br/edr came
+    # back on 5h after a clean boot, which is exactly what "notifications
+    # stopped working two weeks ago and never recovered" looked like. So retry
+    # until `current settings` actually drops br/edr.
+    for i in $(seq 1 8); do
+        case "$(settings)" in
+            *br/edr*) ;;
+            *) break ;;
+        esac
+        [ "$i" -gt 1 ] && log "br/edr still on (try $i) - retrying bredr off"
+        mgmt power off
+        mgmt bredr off
+        mgmt le on
+        mgmt power on
+        sleep 2
+    done
+    case "$(settings)" in
+        *br/edr*) log "WARNING: could not disable br/edr - iOS may grab the classic link and ANCS will never attach" ;;
+        *) log "br/edr disabled - LE only" ;;
+    esac
 fi
 
 REQUIRED_FLAGS="br/edr ssp connectable bondable"

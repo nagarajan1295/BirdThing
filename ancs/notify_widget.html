@@ -84,6 +84,29 @@
     color:#fff!important;border-color:transparent!important;}
 
   @media (prefers-reduced-motion:reduce){.ancs{transition:opacity .15s;}}
+
+  /* ---- persistent phone-link status glyph (top-right, like wifi/bluetooth) ---- */
+  #ancsStat{--s:1;pointer-events:none;display:inline-flex;align-items:center;
+    justify-content:center;position:relative;width:calc(1.15em*var(--s));
+    height:calc(1.15em*var(--s));flex:0 0 auto;color:currentColor;opacity:.32;
+    transition:opacity .4s ease;vertical-align:middle;}
+  #ancsStat.linked{opacity:.9;}
+  #ancsStat svg{width:100%;height:100%;display:block;}
+  #ancsStat .slash{opacity:1;transition:opacity .4s ease;}
+  #ancsStat.linked .slash{opacity:0;}
+  #ancsStat .badge{position:absolute;top:-.15em;right:-.2em;min-width:.95em;
+    height:.95em;padding:0 .16em;box-sizing:border-box;border-radius:.55em;
+    background:#ff3b30;color:#fff;font:600 .62em/.95em 'Inter',system-ui,sans-serif;
+    text-align:center;display:none;}
+  #ancsStat.has-badge .badge{display:block;}
+  #ancsStat.fixed{position:fixed;z-index:180;width:20px;height:20px;
+    font-size:16px;opacity:.32;}
+  #ancsStat.fixed.tr{top:5px;right:6px;}
+  #ancsStat.fixed.tl{top:5px;left:6px;}
+  #ancsStat.fixed.br{bottom:5px;right:6px;}
+  #ancsStat.fixed.bl{bottom:5px;left:6px;}
+  @keyframes ancsPing{0%{transform:scale(1);}35%{transform:scale(1.35);}100%{transform:scale(1);}}
+  #ancsStat.ping{animation:ancsPing .7s ease;}
 </style>
 <script>
 (function(){
@@ -123,6 +146,68 @@
       'calc((' + BASE_FS + ') * ' + S.scale + ')');
   }
   applyStyle();
+
+  // ---- persistent phone-link status glyph -------------------------------
+  // Shows in the top-right of every display, next to the wifi/bluetooth-style
+  // indicators: a phone icon that is bright when the iPhone is linked to the
+  // ANCS hub and dimmed+slashed when it is not, with a red count badge for how
+  // many notifications the phone is currently showing. window.ANCS_STATUS_SLOT
+  // is a CSS selector to place it inline inside the host's own status row;
+  // window.ANCS_STATUS ('tr'|'tl'|'br'|'bl'|'off') is the fixed-corner
+  // fallback used when no slot is found. Default: inline if a known status row
+  // exists, else fixed top-right.
+  var STAT_SLOT = window.ANCS_STATUS_SLOT || null;
+  var STAT_POS  = window.ANCS_STATUS || 'tr';
+  var statEl = null, statBadge = null, lastCount = -1, statLinked = null;
+
+  function buildStat(){
+    if (STAT_POS === 'off') return;
+    var host = null;
+    if (STAT_SLOT) host = document.querySelector(STAT_SLOT);
+    if (!host) {
+      var known = ['.top .tr', '.statusbar', '#statusbar', '.status-icons',
+                   '.sysicons', '#sysbar'];
+      for (var i = 0; i < known.length && !host; i++)
+        host = document.querySelector(known[i]);
+    }
+    statEl = document.createElement('span');
+    statEl.id = 'ancsStat';
+    if (window.ANCS_THEME === 'light') statEl.style.color = '#1c1c1e';
+    // phone outline + a slash line that hides when linked
+    statEl.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+      + '<rect x="7" y="2" width="10" height="20" rx="2.2"></rect>'
+      + '<line x1="11" y1="18" x2="13" y2="18"></line>'
+      + '<line class="slash" x1="3" y1="21" x2="21" y2="3"></line></svg>'
+      + '<span class="badge">0</span>';
+    statBadge = statEl.querySelector('.badge');
+    if (host) {
+      host.appendChild(statEl);
+    } else {
+      statEl.className = 'fixed ' + STAT_POS;
+      document.body.appendChild(statEl);
+    }
+  }
+
+  function statSet(linked, count){
+    if (!statEl) return;
+    if (linked !== statLinked) {
+      statEl.classList.toggle('linked', !!linked);
+      statLinked = linked;
+    }
+    count = count || 0;
+    if (count !== lastCount) {
+      statBadge.textContent = count > 9 ? '9+' : String(count);
+      statEl.classList.toggle('has-badge', count > 0);
+      if (count > lastCount && lastCount >= 0) {
+        statEl.classList.remove('ping');
+        void statEl.offsetWidth;            // restart the animation
+        statEl.classList.add('ping');
+      }
+      lastCount = count;
+    }
+  }
 
   var seen = Object.create(null);
   var primed = false;
@@ -215,7 +300,9 @@
     fetch(URL_, {cache:'no-store'})
       .then(function(r){ return r.json(); })
       .then(function(d){
-        if (!d || !d.items) return;
+        if (!d) return;
+        statSet(d.linked, (d.items || []).length);
+        if (!d.items) return;
         var live = Object.create(null);
         if (d.settings) { CENTRAL = d.settings; markCentral(); }
         // Central per-device switch: this screen is turned off from the
@@ -452,6 +539,7 @@
     if (document.getElementById('ancsSet') || ++tries > 40) clearInterval(iv);
   }, 250);
 
+  buildStat();
   tick();
   setInterval(tick, POLL);
 })();
