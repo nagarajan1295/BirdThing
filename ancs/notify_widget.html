@@ -307,7 +307,15 @@
       .then(function(r){ return r.json(); })
       .then(function(d){
         if (!d) return;
-        statSet(d.linked, (d.items || []).length);
+        // badge = notifications the phone is STILL showing. The gateway keeps
+        // recently-cleared ones in the feed (active:true, removed_ts set) so it
+        // can de-dupe and show "recent" - counting the raw list makes the badge
+        // stick at its high-water mark and never come down when you clear them
+        // on the phone. Count only the ones with no removal and not gone inactive.
+        var lc = 0, _it = d.items || [];
+        for (var _i = 0; _i < _it.length; _i++)
+          if (!_it[_i].removed_ts && _it[_i].active !== false) lc++;
+        statSet(d.linked, lc);
         if (!d.items) return;
         var live = Object.create(null);
         if (d.settings) { CENTRAL = d.settings; markCentral(); }
