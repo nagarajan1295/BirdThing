@@ -36,7 +36,15 @@ def main():
     keys = {"device": "ANCS_DEVICE",
             "theme": "ANCS_THEME", "style": "ANCS_STYLE", "fs": "ANCS_FS",
             "hold_ms": "ANCS_HOLD_MS", "call_hold_ms": "ANCS_CALL_HOLD_MS",
-            "poll_ms": "ANCS_POLL_MS"}
+            "poll_ms": "ANCS_POLL_MS",
+            # phone-link status glyph placement:
+            #   status_slot   = CSS selector of a status row to sit inside
+            #   status_anchor = CSS selector of an existing status icon to sit
+            #                   just left of (so they never overlap)
+            #   status        = 'tr'|'tl'|'br'|'bl'|'off' corner fallback
+            "status_slot": "ANCS_STATUS_SLOT",
+            "status_anchor": "ANCS_STATUS_ANCHOR",
+            "status": "ANCS_STATUS"}
     opts = {}
     for arg in sys.argv[4:]:
         if "=" not in arg:

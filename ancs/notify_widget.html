@@ -10,6 +10,27 @@
                             kiosk         clamp(1.3rem, 2vw, 1.9rem)
        window.ANCS_STYLE  'toast' | 'full'   default layout
        window.ANCS_THEME  'light' for light pages with no body.light
+       window.ANCS_STATUS_SLOT    CSS selector of a status row to put the
+                                  phone-link glyph inside (BirdThing: '.top .tr')
+       window.ANCS_STATUS_ANCHOR  CSS selector of an existing status icon to
+                                  sit just LEFT of, so they never overlap
+                                  (WeatherThing: '#btStatus')
+       window.ANCS_STATUS         'tr'|'tl'|'br'|'bl'|'off' corner fallback
+
+     ---- CHECKLIST for any change here (do ALL before saying it's fixed) ------
+       [ ] UI:      glyph + toast on ALL THREE displays, at every text size,
+                    no overlap with the clock / wifi / bluetooth / chips,
+                    no horizontal page scroll, light AND dark.
+       [ ] FUNCTION: a notification that arrives while the screen is up toasts
+                    once; one that arrives during a reload still toasts; a
+                    cleared-on-phone one stops toasting and drops the badge.
+       [ ] STABILITY: survives a reload / kiosk-watchdog relaunch / reboot
+                    (localStorage: ancsOn, ancsSeenV1). No burst on cold start.
+       [ ] SYNC:    same notify_widget.html injected on all three; repo pushed;
+                    gateway + proxies agree.
+       [ ] VERIFY:  reload each display and read its LIVE DOM / screenshot -
+                    never trust a deploy without looking.
+     -------------------------------------------------------------------------
 
      The user then overrides size / fullscreen / duration / on-off from the
      host page's own Settings screen - this script INJECTS those rows into
@@ -101,13 +122,16 @@
   #ancsStat.has-badge .badge{display:block;}
   /* fixed-corner fallback: no host status row to inherit a colour from, and
      the page may be light OR dark - mid-grey at half opacity reads on both */
-  #ancsStat.fixed{position:fixed;z-index:180;width:20px;height:20px;
+  #ancsStat.fixed{position:fixed;z-index:180;width:22px;height:22px;
     font-size:16px;color:#8a8a8e!important;opacity:.5;}
   #ancsStat.fixed.linked{opacity:.95;}
-  #ancsStat.fixed.tr{top:5px;right:6px;}
-  #ancsStat.fixed.tl{top:5px;left:6px;}
-  #ancsStat.fixed.br{bottom:5px;right:6px;}
-  #ancsStat.fixed.bl{bottom:5px;left:6px;}
+  #ancsStat.fixed.tr{top:6px;right:8px;}
+  #ancsStat.fixed.tl{top:6px;left:8px;}
+  #ancsStat.fixed.br{bottom:6px;right:8px;}
+  #ancsStat.fixed.bl{bottom:6px;left:8px;}
+  /* .anchored: JS pins top/right next to an existing status icon (e.g. the
+     WeatherThing's #btStatus) so the two never overlap */
+  #ancsStat.fixed.anchored{top:0;right:0;}
   @keyframes ancsPing{0%{transform:scale(1);}35%{transform:scale(1.35);}100%{transform:scale(1);}}
   #ancsStat.ping{animation:ancsPing .7s ease;}
 </style>
@@ -159,17 +183,18 @@
   // window.ANCS_STATUS ('tr'|'tl'|'br'|'bl'|'off') is the fixed-corner
   // fallback used when no slot is found. Default: inline if a known status row
   // exists, else fixed top-right.
-  var STAT_SLOT = window.ANCS_STATUS_SLOT || null;
-  var STAT_POS  = window.ANCS_STATUS || 'tr';
+  var STAT_SLOT   = window.ANCS_STATUS_SLOT || null;
+  var STAT_ANCHOR = window.ANCS_STATUS_ANCHOR || null;  // sit just left of this element
+  var STAT_POS    = window.ANCS_STATUS || 'tr';
   var statEl = null, statBadge = null, lastCount = -1, statLinked = null;
 
   function buildStat(){
     if (STAT_POS === 'off') return;
     var host = null;
     if (STAT_SLOT) host = document.querySelector(STAT_SLOT);
-    if (!host) {
-      var known = ['.top .tr', '.statusbar', '#statusbar', '.status-icons',
-                   '.sysicons', '#sysbar'];
+    if (!host && !STAT_ANCHOR) {
+      var known = ['.top .tr', '.status-stack', '.statusbar', '#statusbar',
+                   '.status-icons', '.sysicons', '#sysbar'];
       for (var i = 0; i < known.length && !host; i++)
         host = document.querySelector(known[i]);
     }
@@ -190,6 +215,23 @@
     statBadge = statEl.querySelector('.badge');
     if (host) {
       host.appendChild(statEl);
+      return;
+    }
+    var anchor = STAT_ANCHOR ? document.querySelector(STAT_ANCHOR) : null;
+    if (anchor) {
+      statEl.className = 'fixed anchored';
+      document.body.appendChild(statEl);
+      var place = function(){
+        var r = anchor.getBoundingClientRect();
+        if (!r.width && !r.height) return;   // anchor not laid out yet
+        statEl.style.top = Math.round(r.top + r.height / 2
+          - statEl.offsetHeight / 2) + 'px';
+        statEl.style.right = Math.round(window.innerWidth - r.left + 10) + 'px';
+      };
+      place();
+      setTimeout(place, 400);
+      setTimeout(place, 1500);
+      window.addEventListener('resize', place);
     } else {
       statEl.className = 'fixed ' + STAT_POS;
       document.body.appendChild(statEl);
@@ -215,9 +257,48 @@
     }
   }
 
+  // seen[uid] = { el?, timer?, full?, seeded? }  - this session's live view.
   var seen = Object.create(null);
-  var primed = false;
   var queue = [], current = null;
+
+  // -- PERSISTENT "already shown" set ------------------------------------
+  // The displays reload for all sorts of reasons (kiosk-watchdog relaunch,
+  // chromium crash, a network blip, a deploy). The old code seeded the WHOLE
+  // feed as "seen" on the first poll after every load, so a notification that
+  // arrived in the ~seconds around a reload was silently eaten - it was
+  // already in the feed on the first poll, so it never toasted. That is the
+  // "sometimes it doesn't show on the BirdThing" bug.
+  // Fix: remember which uids we've handled in localStorage (gateway uids are
+  // monotonic, seeded from epoch-ms), pruned to 24h. A reload restores it, so
+  // old notifications stay quiet and only genuinely-new ones toast - exactly
+  // once, ever.
+  var SEEN_KEY = 'ancsSeenV1';
+  function loadSeen(){
+    var out = Object.create(null);
+    try {
+      var raw = JSON.parse(localStorage.getItem(SEEN_KEY) || '{}');
+      var cut = Date.now() - 864e5;
+      for (var k in raw) if (raw[k] > cut) out[k] = raw[k];
+    } catch(e){}
+    return out;
+  }
+  var seenTs = loadSeen();
+  var seenDirty = false, seenSaveAt = 0;
+  function markSeen(uid){
+    if (seenTs[uid] !== undefined) return;
+    seenTs[uid] = Date.now(); seenDirty = true;
+  }
+  function flushSeen(){
+    if (!seenDirty) return;
+    var now = Date.now();
+    if (now - seenSaveAt < 1500) return;
+    seenSaveAt = now; seenDirty = false;
+    try { localStorage.setItem(SEEN_KEY, JSON.stringify(seenTs)); } catch(e){}
+  }
+  // First run ever (nothing remembered): don't replay a backlog of still-"fresh"
+  // notifications as a stack of toasts - only surface ones from the last ~30s.
+  var COLD_START = true;
+  for (var _k in seenTs) { COLD_START = false; break; }
 
   var GLYPH = {IncomingCall:'\u{1F4DE}', MissedCall:'\u{1F4F5}', Voicemail:'\u{1F4FC}',
     Social:'\u{1F4AC}', Schedule:'\u{1F4C5}', Email:'\u2709\uFE0F', News:'\u{1F4F0}',
@@ -289,6 +370,7 @@
     present(queue.shift());
   }
   function show(n){
+    markSeen(n.uid);
     if (!S.on) { seen[n.uid] = {seeded:true}; return; }
     if (S.full) { queue.push(n); next(); } else present(n);
   }
@@ -320,28 +402,39 @@
         var live = Object.create(null);
         if (d.settings) { CENTRAL = d.settings; markCentral(); }
         // Central per-device switch: this screen is turned off from the
-        // BirdThing settings screen. Seed everything so nothing replays in a
-        // burst when it is switched back on.
+        // BirdThing settings screen. Remember everything so nothing replays in
+        // a burst when it is switched back on.
         if (CENTRAL && CENTRAL.devices && CENTRAL.devices[DEVICE] === false) {
-          d.items.forEach(function(n){ seen[n.uid] = {seeded:true}; });
-          primed = true;
+          d.items.forEach(function(n){ seen[n.uid] = {seeded:true}; markSeen(n.uid); });
+          flushSeen();
           return;
         }
         d.items.forEach(function(n){ live[n.uid] = n; });
         d.items.forEach(function(n){
-          if (!primed) { seen[n.uid] = {seeded:true}; return; }
           var rec = seen[n.uid];
-          if (!rec) {
-            if (n.fresh && n.active !== false) { seen[n.uid] = {}; show(n); }
-            else seen[n.uid] = {seeded:true};
-          } else if (rec.el) {
-            if (n.active === false) dismiss(n.uid); else update(n);
+          if (rec && rec.el) {                       // currently on screen
+            if (n.active === false || n.removed_ts) dismiss(n.uid);
+            else update(n);
+            return;
+          }
+          if (rec || seenTs[n.uid] !== undefined) {  // handled already (this load or a prior one)
+            if (!rec) seen[n.uid] = {seeded:true};
+            return;
+          }
+          // brand new to us
+          var age = (typeof n.age === 'number') ? n.age : 0;
+          var recent = age < (COLD_START ? 30 : 240);
+          if (n.fresh && recent && n.active !== false && !n.removed_ts) {
+            seen[n.uid] = {}; show(n);               // show() calls markSeen()
+          } else {
+            seen[n.uid] = {seeded:true}; markSeen(n.uid);
           }
         });
         Object.keys(seen).forEach(function(uid){
           if (seen[uid].el && !live[uid]) dismiss(uid);
         });
-        primed = true;
+        COLD_START = false;
+        flushSeen();
       })
       .catch(function(){});
   }
