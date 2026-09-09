@@ -22,8 +22,11 @@
                     no overlap with the clock / wifi / bluetooth / chips,
                     no horizontal page scroll, light AND dark.
        [ ] FUNCTION: a notification that arrives while the screen is up toasts
-                    once; one that arrives during a reload still toasts; a
-                    cleared-on-phone one stops toasting and drops the badge.
+                    once; one that arrives during a reload still toasts; one
+                    the user reads on their PHONE a second later (removed_ts
+                    set almost immediately) STILL toasts - removed_ts only
+                    drops the badge, it must never gate the toast.
+                    Test with a real removed_ts item, not just /api/test.
        [ ] STABILITY: survives a reload / kiosk-watchdog relaunch / reboot
                     (localStorage: ancsOn, ancsSeenV1). No burst on cold start.
        [ ] SYNC:    same notify_widget.html injected on all three; repo pushed;
@@ -261,17 +264,18 @@
   var seen = Object.create(null);
   var queue = [], current = null;
 
-  // -- PERSISTENT "already shown" set ------------------------------------
-  // The displays reload for all sorts of reasons (kiosk-watchdog relaunch,
-  // chromium crash, a network blip, a deploy). The old code seeded the WHOLE
-  // feed as "seen" on the first poll after every load, so a notification that
-  // arrived in the ~seconds around a reload was silently eaten - it was
-  // already in the feed on the first poll, so it never toasted. That is the
-  // "sometimes it doesn't show on the BirdThing" bug.
-  // Fix: remember which uids we've handled in localStorage (gateway uids are
-  // monotonic, seeded from epoch-ms), pruned to 24h. A reload restores it, so
-  // old notifications stay quiet and only genuinely-new ones toast - exactly
-  // once, ever.
+  // -- reload-safe "already handled" set --------------------------------
+  // The displays reload a lot (kiosk-watchdog relaunch, crash, network blip,
+  // deploy). Seeding the WHOLE feed as "seen" on the first poll after every
+  // load ate any notification that arrived in the reload gap - already in the
+  // feed on that first poll, so it never toasted.
+  // We remember handled ids in localStorage. The id is the gateway's
+  // `disp_uid`: a per-process counter seeded from int(time()*1000), so it is
+  // monotonic within a run and a restart jumps it forward past every earlier
+  // value - no cross-session collision. Pruned to 24h.
+  // IMPORTANT: this only decides "already TOASTED once" - it must never be the
+  // reason a fresh notification is skipped. New notifications always get a
+  // brand-new (higher) disp_uid, so they are never in this set.
   var SEEN_KEY = 'ancsSeenV1';
   function loadSeen(){
     var out = Object.create(null);
@@ -295,8 +299,8 @@
     seenSaveAt = now; seenDirty = false;
     try { localStorage.setItem(SEEN_KEY, JSON.stringify(seenTs)); } catch(e){}
   }
-  // First run ever (nothing remembered): don't replay a backlog of still-"fresh"
-  // notifications as a stack of toasts - only surface ones from the last ~30s.
+  // First run ever (nothing remembered): don't replay a backlog as a stack of
+  // toasts - only surface ones from the last ~30s.
   var COLD_START = true;
   for (var _k in seenTs) { COLD_START = false; break; }
 
@@ -413,18 +417,26 @@
         d.items.forEach(function(n){
           var rec = seen[n.uid];
           if (rec && rec.el) {                       // currently on screen
-            if (n.active === false || n.removed_ts) dismiss(n.uid);
+            // a phone-side clear (removed_ts) must NOT retract a toast that is
+            // mid-hold - someone across the room may be reading it. Only a
+            // call ending (active:false) pulls its banner.
+            if (n.active === false) dismiss(n.uid);
             else update(n);
             return;
           }
-          if (rec || seenTs[n.uid] !== undefined) {  // handled already (this load or a prior one)
+          if (rec || seenTs[n.uid] !== undefined) {  // already toasted (this load or a prior one)
             if (!rec) seen[n.uid] = {seeded:true};
             return;
           }
-          // brand new to us
-          var age = (typeof n.age === 'number') ? n.age : 0;
-          var recent = age < (COLD_START ? 30 : 240);
-          if (n.fresh && recent && n.active !== false && !n.removed_ts) {
+          // Brand new to us. Toast it if it is a real, recent arrival - EVEN
+          // IF the phone has since cleared it. The user glancing at a text on
+          // their phone a second after it lands must not stop it reaching the
+          // room displays; that is the whole point of these screens, and the
+          // gateway keeps such items in the feed (active:true) for exactly
+          // this. removed_ts only affects the badge count, never the toast.
+          var age = (typeof n.age === 'number') ? n.age : 999;
+          var withinColdWindow = !COLD_START || age < 30;
+          if (n.fresh && withinColdWindow && n.active !== false) {
             seen[n.uid] = {}; show(n);               // show() calls markSeen()
           } else {
             seen[n.uid] = {seeded:true}; markSeen(n.uid);
