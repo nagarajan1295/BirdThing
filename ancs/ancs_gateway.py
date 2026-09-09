@@ -223,16 +223,32 @@ class Store:
         self.device = ""
         self.since = 0.0
 
-    def add(self, item):
+    def add(self, item, new=False):
+        """Add or update a notification.
+
+        new=False (default): merge into the existing entry for this ANCS uid if
+        there is one - this is how _emit() folds the fetched attributes into the
+        skeleton that on_notification_source() created.
+
+        new=True: an EVT_ADDED. ANCS notification uids are SMALL INTEGERS that
+        the phone RESTARTS AND REPEATS after every reconnect - and the link
+        reconnects constantly at room distance. So an existing _by_uid entry for
+        this uid is almost always a DIFFERENT, older notification, not this one.
+        Merging into it (the old default) gave the new notification the OLD
+        one's disp_uid, which the displays had already shown - so it silently
+        never appeared. That is the entire "it worked once, then never again".
+        With new=True the old entry keeps its own disp_uid and ages out of the
+        feed on its own, and this notification gets a fresh, higher disp_uid.
+        """
         with self._lock:
             old = self._by_uid.get(item["uid"])
-            if old is not None:
+            if old is not None and not new:
                 old.update(item)
                 return old
             self._seq += 1
             item["disp_uid"] = self._seq
             self._items.append(item)
-            self._by_uid[item["uid"]] = item
+            self._by_uid[item["uid"]] = item      # now points at the new one
             # deque eviction leaves stale uid keys behind; prune them
             live = {i["uid"] for i in self._items}
             for uid in [u for u in self._by_uid if u not in live]:
@@ -813,7 +829,7 @@ class AncsClient:
             "active": True,
             "complete": False,
         }
-        STORE.add(item)
+        STORE.add(item, new=(event_id == EVT_ADDED))
         self.request_attributes(uid)
 
     def request_attributes(self, uid):
@@ -940,6 +956,12 @@ class AncsClient:
             "message": attrs.get(ATTR_MESSAGE, "").strip(),
             "complete": True,
         }
+        # attributes only ever FILL IN the skeleton that on_notification_source
+        # created. If there is no skeleton (its EVT_ADDED was dropped as
+        # pre-existing, or it aged out) there is nothing to show - a bare
+        # attrs-only entry would be missing ts/active/cat and blow up snapshot().
+        if not STORE.known(uid):
+            return
         merged = STORE.add(item)
         if CFG["log_bodies"]:
             log("%s | %s: %s - %s" % (merged.get("cat"), merged["app"],

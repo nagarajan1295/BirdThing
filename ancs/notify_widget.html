@@ -276,10 +276,13 @@
   // IMPORTANT: this only decides "already TOASTED once" - it must never be the
   // reason a fresh notification is skipped. New notifications always get a
   // brand-new (higher) disp_uid, so they are never in this set.
-  var SEEN_KEY = 'ancsSeenV1';
+  // V2: V1 accumulated recycled disp_uids while the gateway had the
+  // EVT_ADDED-merges-into-a-reused-uid bug; abandon it wholesale.
+  var SEEN_KEY = 'ancsSeenV2';
   function loadSeen(){
     var out = Object.create(null);
     try {
+      localStorage.removeItem('ancsSeenV1');
       var raw = JSON.parse(localStorage.getItem(SEEN_KEY) || '{}');
       var cut = Date.now() - 864e5;
       for (var k in raw) if (raw[k] > cut) out[k] = raw[k];
