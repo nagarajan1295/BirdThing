@@ -17,10 +17,16 @@
                                   (WeatherThing: '#btStatus')
        window.ANCS_STATUS         'tr'|'tl'|'br'|'bl'|'off' corner fallback
 
+     NOTIFICATION CENTRE: tap the phone glyph, or swipe down from the top-right
+     corner, for an iOS-style list of everything still on the phone (feed items
+     with no removed_ts). Swipe up / tap the backdrop to close. Gesture
+     listeners are on `document` and only fire on a real vertical drag, so the
+     host's own top-bar taps (clock etc.) still work.
+
      ---- CHECKLIST for any change here (do ALL before saying it's fixed) ------
-       [ ] UI:      glyph + toast on ALL THREE displays, at every text size,
-                    no overlap with the clock / wifi / bluetooth / chips,
-                    no horizontal page scroll, light AND dark.
+       [ ] UI:      glyph + toast + notification centre on ALL THREE displays,
+                    at every text size, no overlap with the clock / wifi /
+                    bluetooth / chips, no horizontal page scroll, light AND dark.
        [ ] FUNCTION: a notification that arrives while the screen is up toasts
                     once; one that arrives during a reload still toasts; one
                     the user reads on their PHONE a second later (removed_ts
@@ -137,6 +143,52 @@
   #ancsStat.fixed.anchored{top:0;right:0;}
   @keyframes ancsPing{0%{transform:scale(1);}35%{transform:scale(1.35);}100%{transform:scale(1);}}
   #ancsStat.ping{animation:ancsPing .7s ease;}
+  #ancsStat.tappable{pointer-events:auto;cursor:pointer;}
+
+  /* ---- notification centre: swipe down from the top-right, or tap the glyph ---- */
+  #ancsCtrBack{position:fixed;inset:0;z-index:205;background:rgba(0,0,0,.45);
+    opacity:0;pointer-events:none;transition:opacity .25s ease;}
+  #ancsCtrBack.open{opacity:1;pointer-events:auto;}
+  #ancsCtr{position:fixed;top:0;left:0;right:0;z-index:210;
+    max-height:88%;display:flex;flex-direction:column;
+    transform:translateY(-102%);transition:transform .28s cubic-bezier(.3,.9,.3,1);
+    font-family:'Inter',-apple-system,system-ui,sans-serif;
+    background:#111113;color:#f5f5f7;
+    border-bottom:1px solid rgba(255,255,255,.12);
+    box-shadow:0 1.2em 3em rgba(0,0,0,.55);}
+  #ancsCtr.open{transform:translateY(0);}
+  body.light #ancsCtr,#ancsCtr.light{background:#f4f4f6;color:#1c1c1e;
+    border-bottom-color:rgba(0,0,0,.12);}
+  #ancsCtr .ctr-head{flex:0 0 auto;display:flex;align-items:baseline;
+    justify-content:space-between;padding:calc(14px*var(--s,1)) calc(20px*var(--s,1)) calc(8px*var(--s,1));}
+  #ancsCtr .ctr-title{font-size:calc(15px*var(--s,1));font-weight:700;
+    letter-spacing:.03em;text-transform:uppercase;opacity:.7;}
+  #ancsCtr .ctr-hint{font-size:calc(12px*var(--s,1));opacity:.4;}
+  #ancsCtr .ctr-list{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding:0 calc(12px*var(--s,1)) calc(14px*var(--s,1));display:flex;
+    flex-direction:column;gap:calc(8px*var(--s,1));}
+  #ancsCtr .ctr-row{display:flex;gap:calc(11px*var(--s,1));align-items:flex-start;
+    background:rgba(255,255,255,.07);border-radius:calc(14px*var(--s,1));
+    padding:calc(11px*var(--s,1)) calc(13px*var(--s,1));}
+  body.light #ancsCtr .ctr-row,#ancsCtr.light .ctr-row{background:rgba(0,0,0,.05);}
+  #ancsCtr .ctr-ico{flex:0 0 auto;width:calc(30px*var(--s,1));height:calc(30px*var(--s,1));
+    border-radius:calc(8px*var(--s,1));display:flex;align-items:center;
+    justify-content:center;font-size:calc(16px*var(--s,1));background:rgba(255,255,255,.12);}
+  body.light #ancsCtr .ctr-ico,#ancsCtr.light .ctr-ico{background:rgba(0,0,0,.08);}
+  #ancsCtr .ctr-body{flex:1 1 auto;min-width:0;}
+  #ancsCtr .ctr-top{display:flex;justify-content:space-between;gap:8px;
+    font-size:calc(11px*var(--s,1));font-weight:600;letter-spacing:.06em;
+    text-transform:uppercase;opacity:.55;margin-bottom:calc(2px*var(--s,1));}
+  #ancsCtr .ctr-name{font-size:calc(15px*var(--s,1));font-weight:600;line-height:1.2;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #ancsCtr .ctr-msg{font-size:calc(13.5px*var(--s,1));opacity:.82;line-height:1.32;
+    margin-top:calc(2px*var(--s,1));display:-webkit-box;-webkit-line-clamp:4;
+    -webkit-box-orient:vertical;overflow:hidden;}
+  #ancsCtr .ctr-empty{padding:calc(30px*var(--s,1)) 0 calc(40px*var(--s,1));
+    text-align:center;opacity:.4;font-size:calc(14px*var(--s,1));}
+  #ancsCtr .ctr-grip{flex:0 0 auto;align-self:center;width:38px;height:4px;
+    border-radius:2px;background:rgba(255,255,255,.25);margin:calc(7px*var(--s,1)) 0 0;}
+  body.light #ancsCtr .ctr-grip,#ancsCtr.light .ctr-grip{background:rgba(0,0,0,.2);}
 </style>
 <script>
 (function(){
@@ -216,6 +268,8 @@
       + '<line class="slash" x1="3" y1="21" x2="21" y2="3"></line></svg>'
       + '<span class="badge">0</span>';
     statBadge = statEl.querySelector('.badge');
+    statEl.classList.add('tappable');
+    statEl.addEventListener('click', function(e){ e.stopPropagation(); toggleCenter(); });
     if (host) {
       host.appendChild(statEl);
       return;
@@ -316,6 +370,97 @@
     Calendar:'\u{1F4C5}', Clock:'\u23F0', Findmy:'\u{1F4CD}', Myq:'\u{1F6AA}'};
   function glyph(n){ return APP_GLYPH[n.app] || GLYPH[n.cat] || GLYPH.Other; }
 
+  function fmtAge(sec){
+    sec = Math.max(0, Math.round(sec || 0));
+    if (sec < 45)   return 'now';
+    if (sec < 3600) return Math.round(sec / 60) + 'm ago';
+    if (sec < 86400) return Math.round(sec / 3600) + 'h ago';
+    return Math.round(sec / 86400) + 'd ago';
+  }
+
+  // ---- notification centre: swipe down from the top-right (or tap the glyph)
+  // to see everything still on the phone, iOS-style. Uses the same feed the
+  // toasts do; a row = a notification the phone has NOT cleared.
+  var ctr = null, ctrBack = null, ctrList = null, ctrOpen = false, ctrItems = [];
+  function buildCenter(){
+    ctrBack = document.createElement('div'); ctrBack.id = 'ancsCtrBack';
+    ctr = document.createElement('div'); ctr.id = 'ancsCtr';
+    if (window.ANCS_THEME === 'light') ctr.classList.add('light');
+    // scale the panel's px sizes to this screen's notification typography
+    var probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;visibility:hidden;font-size:calc((' + BASE_FS + ')*' + S.scale + ')';
+    probe.textContent = 'x'; document.body.appendChild(probe);
+    var fs = parseFloat(getComputedStyle(probe).fontSize) || 21;
+    document.body.removeChild(probe);
+    ctr.style.setProperty('--s', Math.max(0.85, Math.min(2.4, fs / 21)));
+    ctr.innerHTML =
+      '<div class="ctr-head"><span class="ctr-title">Phone</span>'
+      + '<span class="ctr-hint">swipe up to close</span></div>'
+      + '<div class="ctr-list"></div><div class="ctr-grip"></div>';
+    ctrList = ctr.querySelector('.ctr-list');
+    document.body.appendChild(ctrBack);
+    document.body.appendChild(ctr);
+
+    ctrBack.addEventListener('click', closeCenter);
+    ctr.addEventListener('click', function(e){ e.stopPropagation(); });
+
+    // Swipe DOWN starting in the top-right corner -> open. Listeners are on
+    // document and gated by where the touch starts, and they only ever fire on
+    // a clear vertical drag - a TAP moves nothing, so the host's own top-bar
+    // controls (the clock, etc.) keep working untouched.
+    var sy = 0, sx = 0, arm = 0;   // arm: 1 = open-swipe candidate, 2 = close-swipe
+    document.addEventListener('touchstart', function(e){
+      var t = e.touches[0]; sy = t.clientY; sx = t.clientX; arm = 0;
+      if (ctrOpen) { arm = 2; return; }
+      if (t.clientY < Math.max(46, innerHeight * 0.09) &&
+          t.clientX > innerWidth * 0.55) arm = 1;
+    }, {passive:true});
+    document.addEventListener('touchmove', function(e){
+      if (!arm) return;
+      var t = e.touches[0], dy = t.clientY - sy, dx = t.clientX - sx;
+      if (arm === 1 && dy > 36 && dy > Math.abs(dx)) { arm = 0; openCenter(); }
+      else if (arm === 2 && sy - t.clientY > 44) { arm = 0; closeCenter(); }
+    }, {passive:true});
+    document.addEventListener('touchend', function(){ arm = 0; }, {passive:true});
+  }
+  function openCenter(){
+    if (!ctr) return;
+    ctrOpen = true;
+    renderCenter(ctrItems);
+    ctr.classList.add('open'); ctrBack.classList.add('open');
+  }
+  function closeCenter(){
+    ctrOpen = false;
+    if (ctr) { ctr.classList.remove('open'); ctrBack.classList.remove('open'); }
+  }
+  function toggleCenter(){ ctrOpen ? closeCenter() : openCenter(); }
+
+  function renderCenter(items){
+    ctrItems = items || [];
+    if (!ctrOpen || !ctrList) return;
+    var live = ctrItems.filter(function(n){
+      return !n.removed_ts && n.active !== false;
+    });
+    if (!live.length) {
+      ctrList.innerHTML = '<div class="ctr-empty">No notifications</div>';
+      return;
+    }
+    ctrList.textContent = '';
+    live.forEach(function(n){
+      var row = document.createElement('div'); row.className = 'ctr-row';
+      row.innerHTML = '<div class="ctr-ico"></div><div class="ctr-body">'
+        + '<div class="ctr-top"><span class="ctr-app"></span><span class="ctr-age"></span></div>'
+        + '<div class="ctr-name"></div>'
+        + (n.message ? '<div class="ctr-msg"></div>' : '') + '</div>';
+      row.querySelector('.ctr-ico').textContent = glyph(n);
+      row.querySelector('.ctr-app').textContent = n.call ? 'Call' : (n.app || '');
+      row.querySelector('.ctr-age').textContent = fmtAge(n.age);
+      row.querySelector('.ctr-name').textContent = n.title || n.app || 'Notification';
+      if (n.message) row.querySelector('.ctr-msg').textContent = n.message;
+      ctrList.appendChild(row);
+    });
+  }
+
   function build(n, full){
     var el = document.createElement('div');
     el.className = 'ancs ' + (full ? 'full' : 'toast')
@@ -405,6 +550,7 @@
         for (var _i = 0; _i < _it.length; _i++)
           if (!_it[_i].removed_ts && _it[_i].active !== false) lc++;
         statSet(d.linked, lc);
+        renderCenter(_it);
         if (!d.items) return;
         var live = Object.create(null);
         if (d.settings) { CENTRAL = d.settings; markCentral(); }
@@ -661,6 +807,7 @@
     if (document.getElementById('ancsSet') || ++tries > 40) clearInterval(iv);
   }, 250);
 
+  buildCenter();
   buildStat();
   tick();
   setInterval(tick, POLL);

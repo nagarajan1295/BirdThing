@@ -281,6 +281,17 @@ class Store:
         with self._lock:
             return uid in self._by_uid
 
+    def purge_tests(self):
+        """Drop injected test notifications outright (used by /api/test/clear).
+        Real notifications are never deleted, only flagged removed."""
+        with self._lock:
+            keep = [i for i in self._items if not i.get("test")]
+            self._items.clear()
+            self._items.extend(keep)
+            live = {i["uid"] for i in self._items}
+            for u in [k for k in self._by_uid if k not in live]:
+                self._by_uid.pop(u, None)
+
     def set_link(self, linked, device=""):
         with self._lock:
             self.linked = linked
@@ -1495,7 +1506,7 @@ class Handler(BaseHTTPRequestHandler):
                 "call": catid == 1, "active": True, "complete": True,
                 "test": True,
             }
-            STORE.add(item)
+            STORE.add(item, new=True)
             log("injected test notification uid=%d" % item["uid"])
             self._send({"ok": True, "injected": item})
         elif path == "/api/pair":
@@ -1514,9 +1525,7 @@ class Handler(BaseHTTPRequestHandler):
             log("pairing window opened for %d min" % mins)
             self._send({"ok": True, "discoverable_for_minutes": mins})
         elif path == "/api/test/clear":
-            for i in STORE.snapshot(50)["items"]:
-                if i.get("test"):
-                    STORE.remove(i["uid"])
+            STORE.purge_tests()
             self._send({"ok": True})
         else:
             self._send({"ok": False, "error": "not found"}, 404)
