@@ -16,9 +16,6 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: bridgething
     steps:
       - uses: actions/checkout@v4
 
@@ -27,13 +24,15 @@ jobs:
           bun-version-file: bridgething/.bun-version
 
       - run: bun install --frozen-lockfile
+        working-directory: bridgething
 
-      # bridgething-source's own `publish` expects the workspace to be a standalone git
-      # repo (it shells out to git rooted at the workspace dir), which doesn't hold when
-      # bridgething/ is a subdirectory of this repo. --dry-run does the build/bundle/catalog
-      # work without touching git, so do the gh-pages commit ourselves.
-      - name: build the catalog (dry run)
-        run: bun run publish --dry-run
+      # bridgething-source's `publish` (even --dry-run once a gh-pages branch exists) shells
+      # out to git rooted at the workspace dir, which fails once bridgething/ is a subdirectory
+      # of this repo instead of standing alone. `catalog` builds and stages site/ from the local
+      # apps/ only, with no git involved, so do the gh-pages commit ourselves below.
+      - name: build and stage the catalog
+        run: bun run catalog
+        working-directory: bridgething
 
       - name: merge into gh-pages and push
         run: |
@@ -49,7 +48,7 @@ jobs:
           fi
           # copy without deleting: keeps every previously published version's files even
           # though this run's site/ only knows about the apps/versions in this checkout.
-          cp -r site/. /tmp/gh-pages-worktree/
+          cp -r bridgething/site/. /tmp/gh-pages-worktree/
           cd /tmp/gh-pages-worktree
           git add -A
           if git diff --cached --quiet; then
