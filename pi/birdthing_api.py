@@ -780,6 +780,41 @@ def clap_test(q=None):
 # or port itself. Short cache so a 2.5s UI poll can't stampede the gateway.
 _ancs_cache = {"t": 0.0, "d": {"ok": False, "linked": False, "items": []}}
 ANCS_URL = "http://127.0.0.1:8099/api/notifications"
+ANCS_SET_URL = "http://127.0.0.1:8099/api/settings"
+ANCS_DISMISS_URL = "http://127.0.0.1:8099/api/dismiss"
+
+
+def notify_clear(qs=""):
+    """Write-through 'Clear' from this screen's notification centre - see
+    Store.dismiss_from_display() on the gateway. qs empty = clear everything
+    currently shown; qs='uid=<n>' clears just that one row."""
+    url = ANCS_DISMISS_URL + ("?" + qs if qs else "")
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        _ancs_cache["t"] = 0.0      # force the next poll to see the clear
+        return data
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def notify_set(qs=""):
+    """Write-through to the gateway's central display settings.
+
+    The dashboard runs on the Car Thing, which can only reach this Pi's :8090 -
+    not the gateway's :8099 - so the settings write has to be proxied the same
+    way the notification feed already is. Settings live in the gateway because
+    ALL THREE screens poll it; putting them anywhere else would mean the
+    BirdThing settings screen could not control the other two.
+    """
+    url = ANCS_SET_URL + ("/set?" + qs if qs else "")
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        _ancs_cache["t"] = 0.0      # force the next poll to see the new settings
+        return data
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def notify():
@@ -815,6 +850,14 @@ class H(BaseHTTPRequestHandler):
                 self.end_headers(); self.wfile.write(body)
             except Exception as e:
                 self._send(500, "text/plain", str(e).encode())
+        elif self.path.startswith("/api/notifyset"):
+            # ?hold=15&show_body=0&dev_kiosk=0 ... ; no query = just read back
+            q = self.path.split("?", 1)
+            self._send(200, "application/json", json.dumps(notify_set(q[1] if len(q) > 1 else "")).encode())
+        elif self.path.startswith("/api/notifyclear"):
+            # ?uid=<n> clears one row; no query clears everything shown
+            q = self.path.split("?", 1)
+            self._send(200, "application/json", json.dumps(notify_clear(q[1] if len(q) > 1 else "")).encode())
         elif self.path.startswith("/api/notify"):
             self._send(200, "application/json", json.dumps(notify()).encode())
         elif self.path.startswith("/api/detections"):

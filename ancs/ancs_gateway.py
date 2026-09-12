@@ -292,6 +292,30 @@ class Store:
             for u in [k for k in self._by_uid if k not in live]:
                 self._by_uid.pop(u, None)
 
+    def dismiss_from_display(self, disp_uid=None):
+        """User-initiated 'Clear' tap on one of the house displays.
+
+        Unlike remove() (a phone-side EVT_REMOVED, which must NOT retract a
+        toast someone across the room may still be reading), this is the user
+        looking at the screen right now and explicitly asking for it gone -
+        so it is safe to hide immediately on every display. Distinct field
+        (dismissed_ts) so it never interacts with the active/removed_ts logic
+        that the phone-clear path depends on. disp_uid=None clears everything
+        currently visible; a real disp_uid clears just that one item.
+
+        This can only ever affect what the HOUSE DISPLAYS show - ANCS has no
+        mechanism for an accessory to remove a notification from the phone's
+        own Notification Centre, so a phone-side clear is a separate,
+        one-way-only thing this cannot touch.
+        """
+        with self._lock:
+            now = time.time()
+            for item in self._items:
+                if item.get("dismissed_ts"):
+                    continue
+                if disp_uid is None or item.get("disp_uid") == disp_uid:
+                    item["dismissed_ts"] = now
+
     def set_link(self, linked, device=""):
         with self._lock:
             self.linked = linked
@@ -1509,6 +1533,21 @@ class Handler(BaseHTTPRequestHandler):
             STORE.add(item, new=True)
             log("injected test notification uid=%d" % item["uid"])
             self._send({"ok": True, "injected": item})
+        elif path == "/api/dismiss":
+            # "Clear" tap from a display - see Store.dismiss_from_display().
+            # No uid = clear everything currently shown; uid=<disp_uid> (the
+            # id the displays already use as n.uid, from snapshot()'s remap)
+            # clears just that one row.
+            from urllib.parse import parse_qs
+            q = parse_qs(parts[1] if len(parts) > 1 else "")
+            uid = None
+            if "uid" in q:
+                try:
+                    uid = int(q["uid"][0])
+                except Exception:                           # noqa: BLE001
+                    uid = None
+            STORE.dismiss_from_display(uid)
+            self._send({"ok": True})
         elif path == "/api/pair":
             # re-open classic discoverability so a phone can be (re-)paired
             mins = 5
