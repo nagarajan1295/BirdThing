@@ -1,0 +1,70 @@
+{
+  "$schema": "https://apps.bridgething.com/schemas/catalog/v1.json",
+  "schema": "catalog.v1",
+  "updated_at": "2026-09-12T17:07:35.030Z",
+  "repo": {
+    "name": "BirdThing",
+    "description": "Bird identification from a BirdNET-Pi, for the Spotify Car Thing.",
+    "homepage": "https://github.com/nagarajan1295/BirdThing",
+    "icon": null
+  },
+  "apps": [
+    {
+      "id": "01a09675-e7fe-77c4-8edf-38ec1be76afb",
+      "name": "BirdThing",
+      "description": "Live bird identifications from your BirdNET-Pi, on your Car Thing's screen.",
+      "author": "Naga",
+      "icon": "https://nagarajan1295.github.io/BirdThing/icons/01a09675-e7fe-77c4-8edf-38ec1be76afb.png",
+      "homepage": "https://github.com/nagarajan1295/BirdThing",
+      "source": "https://github.com/nagarajan1295/BirdThing",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "released_at": "2026-09-12T17:07:28.189Z",
+          "download": {
+            "url": "https://nagarajan1295.github.io/BirdThing/r/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.1.0.zip",
+            "size": 851735,
+            "sha256": "b393aa81f1f70351f89eff655e32d05808d1cd58f9e377b78c40c38576da37f2"
+          },
+          "settings": {
+            "url": "https://nagarajan1295.github.io/BirdThing/s/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.1.0.html",
+            "size": 26933,
+            "sha256": "3bedec385216385c8726892c1c58b9ecac74fa380ed097c799e8c64d3a3b4b59"
+          },
+          "permissions": [],
+          "min_libbridgething_version": "0.12.1",
+          "changelog": "First bridgething release: live detections, today's activity, and a scrollable\nhistory from a BirdNET-Pi, wired to the Car Thing's knob and buttons."
+        }
+      ]
+    },
+    {
+      "id": "01a09688-246b-705e-9856-a847d1c0573c",
+      "name": "WeatherThing",
+      "description": "A big clock and current-conditions weather station, with an hourly forecast strip and now-playing.",
+      "author": "Naga",
+      "icon": "https://nagarajan1295.github.io/BirdThing/icons/01a09688-246b-705e-9856-a847d1c0573c.png",
+      "homepage": "https://github.com/nagarajan1295/BirdThing",
+      "source": "https://github.com/nagarajan1295/BirdThing",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "released_at": "2026-09-12T17:07:35.026Z",
+          "download": {
+            "url": "https://nagarajan1295.github.io/BirdThing/r/01a09688-246b-705e-9856-a847d1c0573c/0.1.0.zip",
+            "size": 853126,
+            "sha256": "a97cebc9c3f74f7258a8fbfdbaccc699799fec7154ee1f121040f1d58661face"
+          },
+          "settings": {
+            "url": "https://nagarajan1295.github.io/BirdThing/s/01a09688-246b-705e-9856-a847d1c0573c/0.1.0.html",
+            "size": 26927,
+            "sha256": "1faf6a0bce4cc84dab889b6acd5230e7f540bf75a1787ada661910ea127e50b1"
+          },
+          "permissions": [],
+          "min_libbridgething_version": "0.12.1",
+          "changelog": "First bridgething release: a big clock, current conditions from Open-Meteo, an\nhourly forecast strip you scroll with the knob, and a now-playing footer."
+        }
+      ]
+    }
+  ],
+  "recommended_sources": []
+}
