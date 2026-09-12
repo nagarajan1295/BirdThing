@@ -13,13 +13,12 @@ concurrency:
 permissions:
   contents: write
 
-defaults:
-  run:
-    working-directory: bridgething
-
 jobs:
   publish:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bridgething
     steps:
       - uses: actions/checkout@v4
 
@@ -29,10 +28,33 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: identify the publisher
+      # bridgething-source's own `publish` expects the workspace to be a standalone git
+      # repo (it shells out to git rooted at the workspace dir), which doesn't hold when
+      # bridgething/ is a subdirectory of this repo. --dry-run does the build/bundle/catalog
+      # work without touching git, so do the gh-pages commit ourselves.
+      - name: build the catalog (dry run)
+        run: bun run publish --dry-run
+
+      - name: merge into gh-pages and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: build every unpublished version and push the catalog
-        run: bun run publish
+          git fetch origin gh-pages 2>/dev/null || true
+          rm -rf /tmp/gh-pages-worktree
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git worktree add /tmp/gh-pages-worktree gh-pages
+          else
+            git worktree add --detach /tmp/gh-pages-worktree
+            (cd /tmp/gh-pages-worktree && git checkout --orphan gh-pages && git rm -rf . >/dev/null 2>&1 || true)
+          fi
+          # copy without deleting: keeps every previously published version's files even
+          # though this run's site/ only knows about the apps/versions in this checkout.
+          cp -r site/. /tmp/gh-pages-worktree/
+          cd /tmp/gh-pages-worktree
+          git add -A
+          if git diff --cached --quiet; then
+            echo "catalog unchanged, nothing to publish"
+          else
+            git commit -m "publish catalog"
+            git push origin gh-pages
+          fi
