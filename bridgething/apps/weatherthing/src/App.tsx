@@ -135,9 +135,9 @@ export default function App() {
   const client = useMemo(() => new BridgethingClient({ url: daemonUrl() }), []);
   const [conn, setConn] = useState<ConnectionState>(client.connectionState);
   const [time, setTime] = useState<TimeInfo | null>(null);
-  const [place, setPlace] = useState('Potsdam, NY');
-  const [lat, setLat] = useState(44.6701);
-  const [lon, setLon] = useState(-74.9774);
+  const [place, setPlace] = useState('New York, NY');
+  const [lat, setLat] = useState(40.7128);
+  const [lon, setLon] = useState(-74.006);
   const [unit, setUnit] = useState<Unit>('C');
   const [weather, setWeather] = useState<Weather | null>(null);
   const [error, setError] = useState<string | null>(null);
