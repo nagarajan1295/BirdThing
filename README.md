@@ -103,11 +103,46 @@ for how every piece fits together.
 ## Repo layout
 
 ```
-pi/         services that run on the Raspberry Pi (receiver, dashboard API, loopback feeder, usb0)
-carthing/   daemons that run on the Car Thing (mic capture, knob/button/brightness, backlight)
-dashboard/  the 800×480 web UI + bundled font
-docs/       setup guide, architecture, Bluetooth plan, screenshots
+pi/          services that run on the Raspberry Pi (receiver, dashboard API, loopback feeder, usb0)
+carthing/    daemons that run on the Car Thing (mic capture, knob/button/brightness, backlight)
+dashboard/   the 800×480 web UI + bundled font
+docs/        setup guide, architecture, Bluetooth plan, screenshots
+bridgething/ the BirdThing webapp for bridgething (see below)
 ```
+
+## BirdThing (and WeatherThing) on bridgething
+
+[bridgething](https://bridgething.com) is a community daemon/OS for the Car Thing
+that replaces Nocturne with a webapp platform (React + a typed client over
+WebSocket) — see [bridgething/](bridgething/), a two-app catalog for the
+[bridgething app jam](https://bridgething.com/appjam/):
+
+- **`apps/birdthing`** polls a BirdNET‑Pi's existing dashboard API
+  (`/api/detections`, `/api/stats`, `/api/image`) through `client.net.fetch`
+  (bridgething tunnels a webapp's HTTP through the connected phone/desktop
+  companion) and renders the latest detection, today's activity, and a
+  knob‑scrollable recent list. Configure the Pi's `host:port` from the app's
+  settings page.
+- **`apps/weatherthing`** is the standalone clock/weather sibling: a big clock
+  (from `client.time`, since the Car Thing has no RTC), current conditions and
+  a 7‑day/hourly forecast straight from Open‑Meteo (no Pi needed — just a
+  connected phone with internet), and a now‑playing footer from
+  `client.player`. The knob scrolls the day strip; set your coordinates from
+  the app's settings page.
+
+```bash
+cd bridgething
+bun install
+bun run dev birdthing              # http://localhost:5173, proxies a connected Car Thing
+bun run dev weatherthing
+bun run --cwd apps/birdthing dev:device    # push + hot-reload onto real hardware
+bun run check                       # typecheck, build, bundle, validate the catalog
+```
+
+Pushing to `master` publishes both apps' catalog to this repo's `gh-pages`
+branch (once GitHub Pages is enabled for it) at
+`https://nagarajan1295.github.io/BirdThing/catalog.v1.json` — the URL to submit
+to the app jam.
 
 ## Credits
 

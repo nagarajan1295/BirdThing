@@ -1,0 +1,38 @@
+name: bridgething publish
+
+on:
+  push:
+    branches: [master]
+    paths: ['bridgething/**']
+  workflow_dispatch:
+
+concurrency:
+  group: bridgething-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: bridgething
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: bridgething/.bun-version
+
+      - run: bun install --frozen-lockfile
+
+      - name: identify the publisher
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: build every unpublished version and push the catalog
+        run: bun run publish

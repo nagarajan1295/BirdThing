@@ -1,0 +1,35 @@
+{
+  "id": "01a09688-246b-705e-9856-a847d1c0573c",
+  "name": "WeatherThing",
+  "version": "0.1.0",
+  "description": "A big clock and current-conditions weather station, with an hourly forecast strip and now-playing.",
+  "settings": "settings.html",
+  "icon": "icon.png",
+  "config": [
+    {
+      "type": "string",
+      "data": {
+        "key": "place",
+        "label": "Location name",
+        "pattern": null,
+        "minLength": null,
+        "maxLength": 80,
+        "default": "Potsdam, NY"
+      }
+    },
+    {
+      "type": "number",
+      "data": { "key": "lat", "label": "Latitude", "min": -90, "max": 90, "step": 0.0001, "default": 44.6701 }
+    },
+    {
+      "type": "number",
+      "data": { "key": "lon", "label": "Longitude", "min": -180, "max": 180, "step": 0.0001, "default": -74.9774 }
+    },
+    {
+      "type": "enum",
+      "data": { "key": "unit", "label": "Temperature unit", "choices": ["C", "F"], "default": "C" }
+    }
+  ],
+  "permissions": [],
+  "art": { "heroPx": 248, "thumbPx": 96 }
+}
