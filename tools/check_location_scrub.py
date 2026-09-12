@@ -23,7 +23,12 @@ RULES = [
     (re.compile(r"44\.6\d{2,}"), "40.7128"),
     (re.compile(r"-74\.9\d{2,}"), "-74.0060"),
 ]
-TARGETS = ["pi/birdthing_api.py", "dashboard/birdthing-dashboard.html"]
+TARGETS = [
+    "pi/birdthing_api.py",
+    "dashboard/birdthing-dashboard.html",
+    "bridgething/apps/weatherthing/public/manifest.json",
+    "bridgething/apps/weatherthing/src/App.tsx",
+]
 
 root = pathlib.Path(__file__).resolve().parent.parent
 fix = "--fix" in sys.argv
