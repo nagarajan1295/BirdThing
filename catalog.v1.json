@@ -1,7 +1,7 @@
 {
   "$schema": "https://apps.bridgething.com/schemas/catalog/v1.json",
   "schema": "catalog.v1",
-  "updated_at": "2026-09-12T17:07:35.030Z",
+  "updated_at": "2026-09-12T17:13:52.882Z",
   "repo": {
     "name": "BirdThing",
     "description": "Bird identification from a BirdNET-Pi, for the Spotify Car Thing.",
@@ -20,11 +20,11 @@
       "versions": [
         {
           "version": "0.1.0",
-          "released_at": "2026-09-12T17:07:28.189Z",
+          "released_at": "2026-09-12T17:13:51.846Z",
           "download": {
             "url": "https://nagarajan1295.github.io/BirdThing/r/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.1.0.zip",
             "size": 851735,
-            "sha256": "b393aa81f1f70351f89eff655e32d05808d1cd58f9e377b78c40c38576da37f2"
+            "sha256": "b209d76ec0de1ca48231bf6a1fdab555a64a645254e0b0c0d2e9210c1ad74bf2"
           },
           "settings": {
             "url": "https://nagarajan1295.github.io/BirdThing/s/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.1.0.html",
@@ -48,11 +48,11 @@
       "versions": [
         {
           "version": "0.1.0",
-          "released_at": "2026-09-12T17:07:35.026Z",
+          "released_at": "2026-09-12T17:13:52.880Z",
           "download": {
             "url": "https://nagarajan1295.github.io/BirdThing/r/01a09688-246b-705e-9856-a847d1c0573c/0.1.0.zip",
             "size": 853126,
-            "sha256": "a97cebc9c3f74f7258a8fbfdbaccc699799fec7154ee1f121040f1d58661face"
+            "sha256": "a1760e0277ecd706be46cbf431bc841e668ab58cedcfaea7a041839b25a4649a"
           },
           "settings": {
             "url": "https://nagarajan1295.github.io/BirdThing/s/01a09688-246b-705e-9856-a847d1c0573c/0.1.0.html",
