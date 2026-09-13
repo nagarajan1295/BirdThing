@@ -1,4 +1,4 @@
-import { BridgethingClient, type ConnectionState, type PlayerState, type TimeInfo } from '@bridgething/client';
+import { BridgethingClient, type ConnectionState, type TimeInfo } from '@bridgething/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { daemonUrl } from './daemon';
 
@@ -34,43 +34,160 @@ const WMO: Record<number, [string, string]> = {
   96: ['storm', 'Thunderstorm'],
   99: ['storm', 'Thunderstorm'],
 };
-const ICON_EMOJI: Record<string, string> = {
-  clear: '☀️',
-  mclear: '🌤️',
-  partly: '⛅',
-  cloud: '☁️',
-  fog: '🌫️',
-  drizzle: '🌦️',
-  rain: '🌧️',
-  snow: '❄️',
-  storm: '⛈️',
-};
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const wmo = (code: number): [string, string] => WMO[code] ?? ['cloud', '—'];
 
+const SUN = '#ffd60a';
+const CL = '#dfe4ec';
+const CLN = '#aeb6c2';
+const DROP = '#4aa8ff';
+const FLAKE = '#ffffff';
+const BOLT = '#ffd60a';
+const MOONC = '#e6ebf7';
+
+function WeatherIcon({ icon, night, className }: { icon: string; night?: boolean; className?: string }) {
+  const key = night && (icon === 'clear' || icon === 'mclear') ? 'moon' : icon;
+  const svgProps = { viewBox: '0 0 24 24', className, fill: 'none', strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  switch (key) {
+    case 'clear':
+    case 'mclear':
+      return (
+        <svg {...svgProps}>
+          <g stroke={SUN} strokeWidth="1.8">
+            <path d="M12 2.4v2.3M12 19.3v2.3M4.4 4.4 6 6M18 18l1.6 1.6M2.4 12h2.3M19.3 12h2.3M4.4 19.6 6 18M18 6l1.6-1.6" />
+          </g>
+          <circle cx="12" cy="12" r="4.4" fill={SUN} stroke={SUN} strokeWidth="1.8" />
+        </svg>
+      );
+    case 'moon':
+      return (
+        <svg {...svgProps}>
+          <path d="M20 14.3A8 8 0 0 1 9.7 4 8 8 0 1 0 20 14.3Z" fill={MOONC} stroke={MOONC} strokeWidth="1.4" />
+        </svg>
+      );
+    case 'partly':
+      return (
+        <svg {...svgProps}>
+          <g stroke={SUN} strokeWidth="1.6">
+            <path d="M7.5 2.4v1.7M2.5 7.5h1.7M3.6 3.6 4.8 4.8M12.5 7.5h-1.7M11.4 3.6 10.2 4.8" />
+          </g>
+          <circle cx="7.5" cy="7.5" r="2.9" fill={SUN} stroke={SUN} strokeWidth="1.6" />
+          <path
+            d="M17.5 20H8.2a4.4 4.4 0 1 1 .9-8.7A5.4 5.4 0 0 1 20 13.4 3.2 3.2 0 0 1 17.5 20Z"
+            fill={CL}
+            stroke={CLN}
+            strokeWidth="1.2"
+          />
+        </svg>
+      );
+    case 'fog':
+      return (
+        <svg {...svgProps}>
+          <path
+            d="M17.5 13.5H8a5.3 5.3 0 1 1 1.1-10.5A6.3 6.3 0 0 1 20.3 5.6 3.6 3.6 0 0 1 17.5 13.5Z"
+            fill={CL}
+            stroke={CLN}
+            strokeWidth="1.2"
+          />
+          <g stroke={CLN} strokeWidth="1.8">
+            <path d="M5 17.5h11M7 20.5h8" />
+          </g>
+        </svg>
+      );
+    case 'drizzle':
+      return (
+        <svg {...svgProps}>
+          <path
+            d="M17.5 14.5H8a5.3 5.3 0 1 1 1.1-10.5A6.3 6.3 0 0 1 20.3 6.6 3.6 3.6 0 0 1 17.5 14.5Z"
+            fill={CL}
+            stroke={CLN}
+            strokeWidth="1.2"
+          />
+          <g stroke={DROP} strokeWidth="2">
+            <path d="M9 18v1.6M13 18v1.6M17 18v1.6" />
+          </g>
+        </svg>
+      );
+    case 'rain':
+      return (
+        <svg {...svgProps}>
+          <path
+            d="M17.5 14H8a5.3 5.3 0 1 1 1.1-10.5A6.3 6.3 0 0 1 20.3 6.1 3.6 3.6 0 0 1 17.5 14Z"
+            fill={CL}
+            stroke={CLN}
+            strokeWidth="1.2"
+          />
+          <g stroke={DROP} strokeWidth="2">
+            <path d="M9 17.5v3M13 17.5v3M17 17.5v3" />
+          </g>
+        </svg>
+      );
+    case 'snow':
+      return (
+        <svg {...svgProps}>
+          <path
+            d="M17.5 14H8a5.3 5.3 0 1 1 1.1-10.5A6.3 6.3 0 0 1 20.3 6.1 3.6 3.6 0 0 1 17.5 14Z"
+            fill={CL}
+            stroke={CLN}
+            strokeWidth="1.2"
+          />
+          <g stroke={FLAKE} strokeWidth="2.2">
+            <path d="M9 18h.01M9 20.6h.01M13 18.7h.01M13 21.3h.01M17 18h.01M17 20.6h.01" />
+          </g>
+        </svg>
+      );
+    case 'storm':
+      return (
+        <svg {...svgProps}>
+          <path
+            d="M17.5 13.5H8a5.3 5.3 0 1 1 1.1-10.5A6.3 6.3 0 0 1 20.3 5.6 3.6 3.6 0 0 1 17.5 13.5Z"
+            fill={CLN}
+            stroke="#97a0ad"
+            strokeWidth="1.2"
+          />
+          <path d="M12.5 12.5 10.2 16.5h3l-2.3 4" fill="none" stroke={BOLT} strokeWidth="2" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...svgProps}>
+          <path
+            d="M17.5 18.5H8a5.3 5.3 0 1 1 1.1-10.5A6.3 6.3 0 0 1 20.3 10.6 3.6 3.6 0 0 1 17.5 18.5Z"
+            fill={CL}
+            stroke={CLN}
+            strokeWidth="1.2"
+          />
+        </svg>
+      );
+  }
+}
+
+const FDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const FMON = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 type Hour = { t: string; temp: number; icon: string };
-type Day = { date: string; dow: string; icon: string; hi: number; lo: number };
 type Weather = {
   temp: number;
-  feels: number;
-  humidity: number;
-  wind: number;
-  windUnit: string;
-  icon: string;
   desc: string;
+  icon: string;
+  hi: number;
+  lo: number;
   hourly: Hour[];
-  daily: Day[];
+  sunrise: string | null;
+  sunset: string | null;
 };
 
 async function fetchWeather(client: BridgethingClient, lat: number, lon: number, unit: Unit): Promise<Weather> {
   const imperial = unit === 'F';
   const url =
     `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-    `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m` +
+    `&current=temperature_2m,weather_code` +
     `&hourly=temperature_2m,weather_code` +
     `&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset` +
-    `&forecast_days=7&timezone=auto` +
-    `&temperature_unit=${imperial ? 'fahrenheit' : 'celsius'}&wind_speed_unit=${imperial ? 'mph' : 'kmh'}`;
+    `&forecast_days=2&timezone=auto` +
+    `&temperature_unit=${imperial ? 'fahrenheit' : 'celsius'}`;
   const res = await client.net.fetch({
     request: { url, method: 'GET', headers: [], body: null, timeoutMs: 8000, redirect: 'follow' },
   });
@@ -90,46 +207,50 @@ async function fetchWeather(client: BridgethingClient, lat: number, lon: number,
   let start = (H.time as string[]).findIndex(t => t.slice(0, 13) >= nowIso);
   if (start < 0) start = 0;
   const hourly: Hour[] = [];
-  for (let i = start; i < Math.min(start + 8, H.time.length); i++) {
+  for (let i = start; i < Math.min(start + 7, H.time.length); i++) {
     hourly.push({ t: H.time[i].slice(11, 16), temp: Math.round(H.temperature_2m[i]), icon: wmo(H.weather_code[i])[0] });
   }
   const DD = d.daily;
-  const daily: Day[] = DD.time.map((date: string, i: number) => ({
-    date,
-    dow: DOW[new Date(`${date}T12:00:00`).getDay()],
-    icon: wmo(DD.weather_code[i])[0],
-    hi: Math.round(DD.temperature_2m_max[i]),
-    lo: Math.round(DD.temperature_2m_min[i]),
-  }));
 
   return {
     temp: Math.round(cur.temperature_2m),
-    feels: Math.round(cur.apparent_temperature),
-    humidity: Math.round(cur.relative_humidity_2m),
-    wind: Math.round(cur.wind_speed_10m),
-    windUnit: imperial ? 'mph' : 'km/h',
-    icon,
     desc,
+    icon,
+    hi: Math.round(DD.temperature_2m_max[0]),
+    lo: Math.round(DD.temperature_2m_min[0]),
     hourly,
-    daily,
+    sunrise: DD.sunrise?.[0]?.slice(11, 16) ?? null,
+    sunset: DD.sunset?.[0]?.slice(11, 16) ?? null,
   };
 }
 
-function useClock(time: TimeInfo | null) {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (time?.wallClockUnixS) {
-        const drift = time.wallClockUnixS * 1000 - Date.now();
-        setNow(new Date(Date.now() + drift));
-      } else {
-        setNow(new Date());
-      }
-    }, 1000);
-    return () => clearInterval(id);
-  }, [time?.wallClockUnixS]);
-  return now;
+function hr12(t: string): string {
+  const [h] = t.split(':').map(Number);
+  const ap = h < 12 ? 'a' : 'p';
+  const hh = h % 12 || 12;
+  return `${hh}${ap}`;
 }
+
+function hm(s: string | null): number | null {
+  if (!s) return null;
+  const [h, m] = s.split(':').map(Number);
+  return h * 60 + m;
+}
+
+// clock ticks: 60 lines, every 5th longer and brighter, matching the real weatherstation dial.
+const TICKS = Array.from({ length: 60 }, (_, i) => {
+  const a = (i * 6 * Math.PI) / 180;
+  const big = i % 5 === 0;
+  const r1 = big ? 85 : 89;
+  const r2 = 97;
+  return {
+    x1: (100 + r1 * Math.sin(a)).toFixed(1),
+    y1: (100 - r1 * Math.cos(a)).toFixed(1),
+    x2: (100 + r2 * Math.sin(a)).toFixed(1),
+    y2: (100 - r2 * Math.cos(a)).toFixed(1),
+    big,
+  };
+});
 
 export default function App() {
   const client = useMemo(() => new BridgethingClient({ url: daemonUrl() }), []);
@@ -141,11 +262,6 @@ export default function App() {
   const [unit, setUnit] = useState<Unit>('C');
   const [weather, setWeather] = useState<Weather | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedDay, setSelectedDay] = useState(0);
-  const [player, setPlayer] = useState<PlayerState | null>(null);
-  const [artUrl, setArtUrl] = useState<string | null>(null);
-
-  const now = useClock(time);
 
   useEffect(() => {
     const off = client.on(event => {
@@ -171,25 +287,17 @@ export default function App() {
     ).catch(() => {});
     const offConfig = client.config.onChanged(c => applyConfig(c.key, c.value));
 
-    client.player
-      .stateGet()
-      .then(r => r.ok && setPlayer(r.response.state))
-      .catch(() => {});
-    const offPlayer = client.player.onSnapshot(r => setPlayer(r.state));
-
     return () => {
       off();
       offTime();
       offConfig();
-      offPlayer();
     };
   }, [client]);
 
   const refresh = useMemo(
     () => async () => {
       try {
-        const w = await fetchWeather(client, lat, lon, unit);
-        setWeather(w);
+        setWeather(await fetchWeather(client, lat, lon, unit));
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -200,147 +308,125 @@ export default function App() {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 10 * 60 * 1000);
+    const id = setInterval(refresh, 3 * 60 * 1000);
     return () => clearInterval(id);
   }, [refresh]);
 
-  const artworkId = player?.track?.artworkId ?? null;
+  // wall-clock: apply the daemon's drift + the configured location's IANA zone, since the Car
+  // Thing has no RTC and the browser's own zone is not the weather location's zone.
+  const tz = time?.tzIana ?? undefined;
+  const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    let revoked = false;
-    let blobUrl: string | null = null;
-    setArtUrl(null);
-    if (!artworkId) return;
-    (async () => {
-      const result = await client.asset.get({ id: artworkId, requestId: crypto.randomUUID() });
-      if (revoked || !result.ok) return;
-      const bytes = new Uint8Array(result.response.bytes as unknown as number[]);
-      blobUrl = URL.createObjectURL(new Blob([bytes], { type: result.response.mime ?? 'image/jpeg' }));
-      setArtUrl(blobUrl);
-    })();
-    return () => {
-      revoked = true;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-    };
-  }, [client, artworkId]);
+    const id = setInterval(() => {
+      const drift = time?.wallClockUnixS ? time.wallClockUnixS * 1000 - Date.now() : 0;
+      setNow(new Date(Date.now() + drift));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [time?.wallClockUnixS]);
 
-  const daily = weather?.daily ?? [];
-  const wheelAccum = useRef(0);
+  const zoned = tz ? new Date(now.toLocaleString('en-US', { timeZone: tz })) : now;
+  const hh = zoned.getHours();
+  const ap = hh < 12 ? 'AM' : 'PM';
+  const displayHour = hh % 12 || 12;
+  const mm = String(zoned.getMinutes()).padStart(2, '0');
+  const dateStr = `${FDAY[zoned.getDay()]}, ${zoned.getDate()} ${FMON[zoned.getMonth()]}`;
+
+  const nightNow = useMemo(() => {
+    const rise = hm(weather?.sunrise ?? null);
+    const set = hm(weather?.sunset ?? null);
+    if (rise == null || set == null) return false;
+    const mins = zoned.getHours() * 60 + zoned.getMinutes();
+    return !(mins >= rise && mins < set);
+  }, [weather?.sunrise, weather?.sunset, zoned]);
+
   useEffect(() => {
-    const onWheel = (e: WheelEvent) => {
-      wheelAccum.current += e.deltaX;
-      while (Math.abs(wheelAccum.current) >= 40) {
-        const dir = wheelAccum.current > 0 ? 1 : -1;
-        setSelectedDay(s => Math.min(daily.length - 1, Math.max(0, s + dir)));
-        wheelAccum.current -= dir * 40;
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelectedDay(0);
-      if (e.key === '1') setUnit(u => (u === 'C' ? 'F' : 'C'));
-    };
-    window.addEventListener('wheel', onWheel);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('wheel', onWheel);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [daily.length]);
+    document.body.classList.toggle('light', !!weather && !nightNow);
+  }, [weather, nightNow]);
 
-  const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const dateStr = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
-  const playing = player?.playback.state === 'playing';
+  // hands are set imperatively so the 200ms sweep doesn't re-render the whole tree.
+  const hourRef = useRef<SVGLineElement>(null);
+  const minRef = useRef<SVGLineElement>(null);
+  const secRef = useRef<SVGLineElement>(null);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const drift = time?.wallClockUnixS ? time.wallClockUnixS * 1000 - Date.now() : 0;
+      const d = tz ? new Date(new Date(Date.now() + drift).toLocaleString('en-US', { timeZone: tz })) : new Date(Date.now() + drift);
+      const s = d.getSeconds() + d.getMilliseconds() / 1000;
+      const m = d.getMinutes() + s / 60;
+      const h = (d.getHours() % 12) + m / 60;
+      hourRef.current?.setAttribute('transform', `rotate(${(h * 30).toFixed(2)} 100 100)`);
+      minRef.current?.setAttribute('transform', `rotate(${(m * 6).toFixed(2)} 100 100)`);
+      secRef.current?.setAttribute('transform', `rotate(${(s * 6).toFixed(2)} 100 100)`);
+    }, 200);
+    return () => clearInterval(id);
+  }, [time?.wallClockUnixS, tz]);
 
   return (
-    <div className="flex h-full w-full flex-col gap-3 bg-bg p-5 text-off-white">
-      <header className="flex items-center justify-between border-b border-rule pb-3">
-        <div className="font-mono text-eyebrow uppercase tracking-[0.2em] text-dim">{place}</div>
-        <div className="flex items-center gap-3 font-mono text-eyebrow uppercase tracking-[0.2em] text-dim">
-          {error && <span className="text-err">{error}</span>}
-          <span>{conn}</span>
-        </div>
-      </header>
+    <div className="relative flex h-full w-full flex-col bg-bg text-fg">
+      <div className="absolute right-6 top-3 z-10 text-[13px] font-semibold text-sec">
+        {error ? `weather: ${error}` : conn !== 'open' ? conn : place}
+      </div>
 
-      <div className="flex flex-1 items-center gap-8 overflow-hidden">
-        <div className="flex flex-none flex-col">
-          <div className="font-display text-[4.5rem] font-medium leading-none tracking-display">{timeStr}</div>
-          <div className="mt-1 font-mono text-body text-soft">{dateStr}</div>
-        </div>
-
-        <div className="h-16 w-px bg-rule" />
-
-        {weather ? (
-          <div className="flex flex-1 items-center gap-6">
-            <div className="flex items-center gap-3">
-              <span className="text-6xl leading-none">{ICON_EMOJI[weather.icon] ?? '☁️'}</span>
-              <div>
-                <div className="font-display text-hero font-medium">
-                  {weather.temp}°{unit}
-                </div>
-                <div className="font-mono text-hint text-dim">{weather.desc}</div>
-              </div>
-            </div>
-            <div className="font-mono text-hint text-dim">
-              feels {weather.feels}° · {weather.humidity}% humidity · wind {weather.wind} {weather.windUnit}
-            </div>
+      <div className="flex flex-1 items-center gap-8 px-10 pt-4">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex items-baseline whitespace-nowrap text-[124px] font-semibold leading-[0.9] tracking-[-5px]">
+            {displayHour}:{mm}
+            <span className="ml-2.5 text-[42px] font-medium tracking-[-1px] text-sec">{ap}</span>
           </div>
-        ) : (
-          <div className="font-mono text-body text-dim">loading weather...</div>
-        )}
+          <div className="mt-2 text-[27px] font-semibold uppercase tracking-[1.5px] text-sec">{dateStr}</div>
+
+          <div className="mt-6 flex flex-col items-start">
+            <div className="flex items-center gap-4">
+              <WeatherIcon icon={weather?.icon ?? 'cloud'} night={nightNow} className="h-[66px] w-[66px]" />
+              <span className="text-[74px] font-semibold leading-none tracking-[-3px]">
+                {weather ? weather.temp : '--'}°
+              </span>
+            </div>
+            <div className="mt-1 text-[21px] font-medium">{weather ? weather.desc : 'Connecting'}</div>
+            {weather && (
+              <div className="mt-2 text-[18px] font-semibold tracking-[1px] text-sec">
+                H <b className="text-fg">{weather.hi}°</b>&nbsp;&nbsp;&nbsp;L <b className="text-fg">{weather.lo}°</b>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex w-[300px] flex-none items-center justify-center">
+          <svg viewBox="0 0 200 200" className="h-[292px] w-[292px]">
+            <circle cx="100" cy="100" r="97" fill="none" stroke="var(--color-hair)" strokeWidth="1.5" />
+            <g>
+              {TICKS.map((t, i) => (
+                <line
+                  key={i}
+                  x1={t.x1}
+                  y1={t.y1}
+                  x2={t.x2}
+                  y2={t.y2}
+                  stroke={t.big ? 'var(--color-fg)' : 'var(--color-sec)'}
+                  strokeWidth={t.big ? 2.4 : 1}
+                />
+              ))}
+            </g>
+            <line ref={hourRef} x1="100" y1="100" x2="100" y2="54" stroke="var(--color-fg)" strokeWidth="6" strokeLinecap="round" />
+            <line ref={minRef} x1="100" y1="100" x2="100" y2="34" stroke="var(--color-fg)" strokeWidth="4" strokeLinecap="round" />
+            <line ref={secRef} x1="100" y1="113" x2="100" y2="28" stroke="#ff453a" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="100" cy="100" r="5.5" fill="var(--color-fg)" />
+            <circle cx="100" cy="100" r="2.6" fill="#ff453a" />
+          </svg>
+        </div>
       </div>
 
       {weather && (
-        <div className="flex justify-between border-t border-rule pt-3">
+        <div className="flex flex-none gap-[1px] px-7 pb-4">
           {weather.hourly.map(h => (
-            <div key={h.t} className="flex flex-col items-center gap-1 font-mono text-hint text-soft">
-              <span>{h.t}</span>
-              <span className="text-xl leading-none">{ICON_EMOJI[h.icon] ?? '☁️'}</span>
-              <span>{h.temp}°</span>
+            <div key={h.t} className="flex flex-1 flex-col items-center justify-center gap-[5px] py-1.5">
+              <div className="text-[15px] font-semibold tracking-[0.5px] text-sec">{hr12(h.t)}</div>
+              <WeatherIcon icon={h.icon} className="h-8 w-8" />
+              <div className="text-[24px] font-semibold tabular-nums">{h.temp}°</div>
             </div>
           ))}
         </div>
       )}
-
-      {daily.length > 0 && (
-        <div className="flex justify-between border-t border-rule pt-3">
-          {daily.map((d, i) => (
-            <div
-              key={d.date}
-              className={
-                'flex flex-1 flex-col items-center gap-1 border-t-2 pt-2 font-mono text-hint ' +
-                (i === selectedDay ? 'border-accent text-off-white' : 'border-transparent text-dim')
-              }>
-              <span>{d.dow}</span>
-              <span className="text-lg leading-none">{ICON_EMOJI[d.icon] ?? '☁️'}</span>
-              <span>
-                {d.hi}°/{d.lo}°
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-center gap-3 border-t border-rule pt-3">
-        {artUrl ? (
-          <img src={artUrl} alt="" className="h-10 w-10 flex-none border border-rule object-cover" />
-        ) : (
-          <div className="h-10 w-10 flex-none border border-rule bg-screen" />
-        )}
-        {player?.track ? (
-          <>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-row text-near">{player.track.title ?? 'unknown'}</div>
-              <div className="truncate font-mono text-hint text-dim">{player.track.artist ?? ''}</div>
-            </div>
-            <button
-              className="flex-none border border-edge px-4 py-2 font-mono text-row text-near active:bg-neutral-soft"
-              onClick={() => (playing ? client.player.pause() : client.player.resume())}>
-              {playing ? '❚❚' : '▶'}
-            </button>
-          </>
-        ) : (
-          <div className="font-mono text-hint text-dim">nothing playing</div>
-        )}
-      </div>
     </div>
   );
 }

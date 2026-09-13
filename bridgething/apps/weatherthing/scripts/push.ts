@@ -4,6 +4,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ../webapp-shared/src/gateway.ts
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
@@ -348,7 +349,7 @@ Env: SUPERBIRD_HOST, BRIDGETHING_GATEWAY_PORT, SKIP_BUILD=1
 async function bridgethingPush({ scriptUrl }) {
   const args = parseArgs(process.argv.slice(2));
   const target = await resolveGatewayTarget(args.host);
-  const repoDir = resolve(dirname(new URL(scriptUrl).pathname), '..');
+  const repoDir = resolve(dirname(fileURLToPath(scriptUrl)), '..');
   const distDir = resolve(repoDir, 'dist');
   const manifestPath = resolve(distDir, 'manifest.json');
   const readManifest = () => {

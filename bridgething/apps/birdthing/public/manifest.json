@@ -1,7 +1,7 @@
 {
   "id": "01a09675-e7fe-77c4-8edf-38ec1be76afb",
   "name": "BirdThing",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Live bird identifications from your BirdNET-Pi, on your Car Thing's screen.",
   "settings": "settings.html",
   "icon": "icon.png",
@@ -30,5 +30,8 @@
     }
   ],
   "permissions": [],
-  "art": { "heroPx": 248, "thumbPx": 96 }
+  "art": {
+    "heroPx": 248,
+    "thumbPx": 96
+  }
 }

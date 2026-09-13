@@ -1,5 +1,9 @@
 # BirdThing
 
+## 0.1.1
+
+match the real BirdThing dashboard: hero photo card, stats, and list
+
 ## 0.1.0
 
 First bridgething release: live detections, today's activity, and a scrollable
