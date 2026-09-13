@@ -1,7 +1,7 @@
 {
   "id": "01a09688-246b-705e-9856-a847d1c0573c",
   "name": "WeatherThing",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A big digital and analog clock with current conditions and an hourly forecast strip.",
   "settings": "settings.html",
   "icon": "icon.png",

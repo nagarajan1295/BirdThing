@@ -109,10 +109,15 @@ function hr12(_date: string, time: string): string {
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// see the identical helper (and comment) in weatherthing's App.tsx
-function localNow(time: TimeInfo | null): Date {
-  const driftMs = time?.wallClockUnixS ? time.wallClockUnixS * 1000 - Date.now() : 0;
-  const offsetMin = (time?.utcOffsetMinutes ?? -new Date().getTimezoneOffset()) + (time?.dstOffsetMinutes ?? 0);
+// see the identical helpers (and the comment on why driftMs must be captured once, not
+// recomputed from Date.now() on every tick) in weatherthing's App.tsx
+function driftMsFor(time: TimeInfo | null): number {
+  return time?.wallClockUnixS ? time.wallClockUnixS * 1000 - Date.now() : 0;
+}
+function offsetMinFor(time: TimeInfo | null): number {
+  return (time?.utcOffsetMinutes ?? -new Date().getTimezoneOffset()) + (time?.dstOffsetMinutes ?? 0);
+}
+function localNow(driftMs: number, offsetMin: number): Date {
   return new Date(Date.now() + driftMs + offsetMin * 60000);
 }
 
@@ -283,11 +288,13 @@ export default function App() {
     };
   }, [visible.length, refresh]);
 
-  const [now, setNow] = useState(() => localNow(null));
+  const driftMs = useMemo(() => driftMsFor(time), [time]);
+  const offsetMin = useMemo(() => offsetMinFor(time), [time]);
+  const [now, setNow] = useState(() => localNow(0, offsetMinFor(null)));
   useEffect(() => {
-    const id = setInterval(() => setNow(localNow(time)), 1000);
+    const id = setInterval(() => setNow(localNow(driftMs, offsetMin)), 1000);
     return () => clearInterval(id);
-  }, [time]);
+  }, [driftMs, offsetMin]);
   const clockHour = now.getUTCHours();
   const clockStr = `${clockHour % 12 || 12}:${String(now.getUTCMinutes()).padStart(2, '0')} ${clockHour < 12 ? 'AM' : 'PM'}`;
   const dateStr = `${DOW[now.getUTCDay()]}, ${MON[now.getUTCMonth()]} ${now.getUTCDate()}`;

@@ -1,5 +1,9 @@
 # WeatherThing
 
+## 0.2.1
+
+fix the clock/analog hands actually being frozen (a drift-math bug that cancelled Date.now() out entirely); add an on-device settings screen (button 4): location presets via the knob, unit and theme status
+
 ## 0.2.0
 
 fix a real-hardware crash in the clock/analog hands, add location search, theme + button controls

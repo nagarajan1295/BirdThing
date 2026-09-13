@@ -261,9 +261,19 @@ function hm(s: string | null): number | null {
 // Intl/toLocaleString with a `timeZone` option can throw and crash the render.
 // Shift the epoch by the daemon's plain numeric offset instead, then read the
 // wall clock back out with the UTC getters -- no Intl involved at all.
-function localNow(time: TimeInfo | null): Date {
-  const driftMs = time?.wallClockUnixS ? time.wallClockUnixS * 1000 - Date.now() : 0;
-  const offsetMin = (time?.utcOffsetMinutes ?? -new Date().getTimezoneOffset()) + (time?.dstOffsetMinutes ?? 0);
+//
+// `driftMs` must be captured ONCE per `time` update (the gap between the daemon's clock and
+// Date.now() at that instant) and then added to a FRESH Date.now() on every tick. Computing
+// drift from Date.now() and immediately adding it back to another Date.now() in the same
+// expression cancels both calls out algebraically, freezing the result at a single instant
+// forever -- which is exactly the bug that shipped: the clock and analog hands never moved.
+function driftMsFor(time: TimeInfo | null): number {
+  return time?.wallClockUnixS ? time.wallClockUnixS * 1000 - Date.now() : 0;
+}
+function offsetMinFor(time: TimeInfo | null): number {
+  return (time?.utcOffsetMinutes ?? -new Date().getTimezoneOffset()) + (time?.dstOffsetMinutes ?? 0);
+}
+function localNow(driftMs: number, offsetMin: number): Date {
   return new Date(Date.now() + driftMs + offsetMin * 60000);
 }
 
@@ -284,6 +294,23 @@ const TICKS = Array.from({ length: 60 }, (_, i) => {
 
 type Theme = 'auto' | 'dark' | 'light';
 
+// on-device location picker: coordinates are baked in so it works instantly with no network
+// round trip, as a companion to the companion app's free-text (geocoded) place field.
+const PRESET_PLACES: { name: string; lat: number; lon: number }[] = [
+  { name: 'New York, NY', lat: 40.7128, lon: -74.006 },
+  { name: 'Los Angeles, CA', lat: 34.0522, lon: -118.2437 },
+  { name: 'Chicago, IL', lat: 41.8781, lon: -87.6298 },
+  { name: 'Houston, TX', lat: 29.7604, lon: -95.3698 },
+  { name: 'Phoenix, AZ', lat: 33.4484, lon: -112.074 },
+  { name: 'Seattle, WA', lat: 47.6062, lon: -122.3321 },
+  { name: 'Denver, CO', lat: 39.7392, lon: -104.9903 },
+  { name: 'Miami, FL', lat: 25.7617, lon: -80.1918 },
+  { name: 'Boston, MA', lat: 42.3601, lon: -71.0589 },
+  { name: 'Minneapolis, MN', lat: 44.9778, lon: -93.265 },
+  { name: 'London, UK', lat: 51.5074, lon: -0.1278 },
+  { name: 'Toronto, Canada', lat: 43.6532, lon: -79.3832 },
+];
+
 export default function App() {
   const client = useMemo(() => new BridgethingClient({ url: daemonUrl() }), []);
   const [conn, setConn] = useState<ConnectionState>(client.connectionState);
@@ -298,10 +325,29 @@ export default function App() {
   const [themeOverride, setThemeOverride] = useState<'dark' | 'light' | null>(null);
   const [weather, setWeather] = useState<Weather | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [presetIndex, setPresetIndex] = useState<number | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   const unit = unitOverride ?? configUnit;
-  const lat = geocoded?.lat ?? fallbackLat;
-  const lon = geocoded?.lon ?? fallbackLon;
+  const preset = presetIndex != null ? PRESET_PLACES[presetIndex] : null;
+  const lat = preset?.lat ?? geocoded?.lat ?? fallbackLat;
+  const lon = preset?.lon ?? geocoded?.lon ?? fallbackLon;
+  const placeLabel = preset?.name ?? place;
+
+  // an on-device location pick (button 4 + wheel) persists locally across restarts, independent
+  // of the companion app's config -- so it works even if that settings screen isn't reachable.
+  useEffect(() => {
+    client.store
+      .get({ key: 'presetPlaceIndex' })
+      .then(r => {
+        if (r.ok && r.response.value) setPresetIndex(Number(r.response.value));
+      })
+      .catch(() => {});
+  }, [client]);
+  useEffect(() => {
+    if (presetIndex == null) return;
+    client.store.put({ key: 'presetPlaceIndex', value: String(presetIndex) }).catch(() => {});
+  }, [client, presetIndex]);
 
   useEffect(() => {
     const off = client.on(event => {
@@ -366,25 +412,53 @@ export default function App() {
     return () => clearInterval(id);
   }, [refresh, error]);
 
-  // physical buttons: 1/2 force dark/light, 4 clears back to the configured theme, 3 toggles unit.
+  // physical buttons: 1/2 force dark/light, 3 toggles unit, 4 opens/closes on-device settings.
+  // escape closes settings if open, else clears the theme override back to auto. the wheel
+  // cycles the location preset while settings is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === '1') setThemeOverride('dark');
       if (e.key === '2') setThemeOverride('light');
-      if (e.key === '4') setThemeOverride(null);
       if (e.key === '3') setUnitOverride(u => ((u ?? configUnit) === 'C' ? 'F' : 'C'));
+      if (e.key === '4') setShowSettings(s => !s);
+      if (e.key === 'Escape') {
+        if (showSettings) setShowSettings(false);
+        else setThemeOverride(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [configUnit]);
+  }, [configUnit, showSettings]);
+
+  const wheelAccum = useRef(0);
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (!showSettings) return;
+      wheelAccum.current += e.deltaX;
+      while (Math.abs(wheelAccum.current) >= 40) {
+        const dir = wheelAccum.current > 0 ? 1 : -1;
+        setPresetIndex(i => {
+          const base = i ?? 0;
+          return (base + dir + PRESET_PLACES.length) % PRESET_PLACES.length;
+        });
+        wheelAccum.current -= dir * 40;
+      }
+    };
+    window.addEventListener('wheel', onWheel);
+    return () => window.removeEventListener('wheel', onWheel);
+  }, [showSettings]);
 
   // wall-clock: shift the epoch by the daemon's numeric UTC+DST offset (not Intl/timeZone --
   // an embedded Chromium build can ship without full ICU timezone data and throw on that).
-  const [now, setNow] = useState(() => localNow(null));
+  // drift/offset are derived from `time` only when it changes; every tick re-adds them to a
+  // fresh Date.now() so the clock actually advances (see the comment on driftMsFor/localNow).
+  const driftMs = useMemo(() => driftMsFor(time), [time]);
+  const offsetMin = useMemo(() => offsetMinFor(time), [time]);
+  const [now, setNow] = useState(() => localNow(0, offsetMinFor(null)));
   useEffect(() => {
-    const id = setInterval(() => setNow(localNow(time)), 1000);
+    const id = setInterval(() => setNow(localNow(driftMs, offsetMin)), 1000);
     return () => clearInterval(id);
-  }, [time]);
+  }, [driftMs, offsetMin]);
 
   const hh = now.getUTCHours();
   const minute = now.getUTCMinutes();
@@ -412,7 +486,7 @@ export default function App() {
   const secRef = useRef<SVGLineElement>(null);
   useEffect(() => {
     const id = setInterval(() => {
-      const d = localNow(time);
+      const d = localNow(driftMs, offsetMin);
       const s = d.getUTCSeconds() + d.getUTCMilliseconds() / 1000;
       const m = d.getUTCMinutes() + s / 60;
       const h = (d.getUTCHours() % 12) + m / 60;
@@ -421,13 +495,47 @@ export default function App() {
       secRef.current?.setAttribute('transform', `rotate(${(s * 6).toFixed(2)} 100 100)`);
     }, 200);
     return () => clearInterval(id);
-  }, [time]);
+  }, [driftMs, offsetMin]);
 
   return (
     <div className="relative flex h-full w-full flex-col bg-bg text-fg">
       <div className={'absolute right-6 top-3 z-10 text-[13px] font-semibold ' + (error ? 'text-[#ff453a]' : 'text-sec')}>
-        {error ? `weather unreachable: ${error}` : conn !== 'open' ? conn : place}
+        {error ? `weather unreachable: ${error}` : conn !== 'open' ? conn : placeLabel}
       </div>
+      <div className="absolute left-6 top-3 z-10 text-[12px] font-semibold uppercase tracking-[0.08em] text-dim">
+        button 4: settings
+      </div>
+
+      {showSettings && (
+        <div className="absolute inset-0 z-20 flex flex-col gap-6 bg-bg p-10">
+          <div className="text-[27px] font-semibold">Settings</div>
+
+          <div>
+            <div className="text-[13px] font-semibold uppercase tracking-[0.1em] text-sec">Location -- scroll the knob</div>
+            <div className="mt-2 text-[24px] font-semibold">{placeLabel}</div>
+            <div className="mt-1 text-[14px] text-sec">
+              or type a location in the companion app's settings for this app, which geocodes automatically
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[13px] font-semibold uppercase tracking-[0.1em] text-sec">Temperature unit -- button 3</div>
+            <div className="mt-2 text-[24px] font-semibold">{unit === 'F' ? 'Fahrenheit' : 'Celsius'}</div>
+          </div>
+
+          <div>
+            <div className="text-[13px] font-semibold uppercase tracking-[0.1em] text-sec">
+              Theme -- button 1 dark, button 2 light, escape for auto
+            </div>
+            <div className="mt-2 text-[24px] font-semibold capitalize">
+              {theme}
+              {themeOverride == null && ' (auto)'}
+            </div>
+          </div>
+
+          <div className="mt-auto text-[14px] text-sec">press button 4 or escape to close</div>
+        </div>
+      )}
 
       <div className="flex flex-1 items-center gap-8 px-10 pt-4">
         <div className="flex min-w-0 flex-1 flex-col">

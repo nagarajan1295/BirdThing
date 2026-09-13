@@ -1,5 +1,9 @@
 # BirdThing
 
+## 0.2.1
+
+fix the same clock-freezing drift-math bug as weatherthing
+
 ## 0.2.0
 
 no BirdNET-Pi needed: a live demo mode with real Wikipedia photos, on by default until you set a host
