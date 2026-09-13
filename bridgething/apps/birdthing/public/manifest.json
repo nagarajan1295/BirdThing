@@ -1,8 +1,8 @@
 {
   "id": "01a09675-e7fe-77c4-8edf-38ec1be76afb",
   "name": "BirdThing",
-  "version": "0.1.1",
-  "description": "Live bird identifications from your BirdNET-Pi, on your Car Thing's screen.",
+  "version": "0.2.0",
+  "description": "Bird identifications on your Car Thing's screen -- works standalone with demo data, or live from your own BirdNET-Pi.",
   "settings": "settings.html",
   "icon": "icon.png",
   "config": [
@@ -10,11 +10,11 @@
       "type": "string",
       "data": {
         "key": "host",
-        "label": "BirdNET-Pi address (host:port)",
+        "label": "BirdNET-Pi address (host:port) -- leave blank for demo mode",
         "pattern": null,
         "minLength": null,
         "maxLength": 200,
-        "default": "birdthing.local:8090"
+        "default": ""
       }
     },
     {

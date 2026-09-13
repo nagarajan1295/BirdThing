@@ -1,7 +1,7 @@
 {
   "id": "01a09688-246b-705e-9856-a847d1c0573c",
   "name": "WeatherThing",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A big digital and analog clock with current conditions and an hourly forecast strip.",
   "settings": "settings.html",
   "icon": "icon.png",
@@ -10,7 +10,7 @@
       "type": "string",
       "data": {
         "key": "place",
-        "label": "Location name",
+        "label": "Location (city, region)",
         "pattern": null,
         "minLength": null,
         "maxLength": 80,
@@ -21,7 +21,7 @@
       "type": "number",
       "data": {
         "key": "lat",
-        "label": "Latitude",
+        "label": "Latitude (fallback if location can't be found)",
         "min": -90,
         "max": 90,
         "step": 0.0001,
@@ -32,7 +32,7 @@
       "type": "number",
       "data": {
         "key": "lon",
-        "label": "Longitude",
+        "label": "Longitude (fallback if location can't be found)",
         "min": -180,
         "max": 180,
         "step": 0.0001,
@@ -49,6 +49,19 @@
           "F"
         ],
         "default": "C"
+      }
+    },
+    {
+      "type": "enum",
+      "data": {
+        "key": "theme",
+        "label": "Theme",
+        "choices": [
+          "auto",
+          "dark",
+          "light"
+        ],
+        "default": "auto"
       }
     }
   ],

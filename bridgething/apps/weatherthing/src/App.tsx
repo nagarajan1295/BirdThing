@@ -179,6 +179,26 @@ type Weather = {
   sunset: string | null;
 };
 
+async function geocodePlace(client: BridgethingClient, place: string): Promise<{ lat: number; lon: number } | null> {
+  if (!place.trim()) return null;
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(place)}&count=1&language=en&format=json`;
+  try {
+    const res = await client.net.fetch({
+      request: { url, method: 'GET', headers: [], body: null, timeoutMs: 8000, redirect: 'follow' },
+    });
+    if (!res.ok) return null;
+    const { status, body } = res.response.response;
+    if (status < 200 || status >= 300) return null;
+    const bytes = new Uint8Array(body as unknown as number[]);
+    const d = JSON.parse(new TextDecoder().decode(bytes));
+    const r = d.results?.[0];
+    if (!r) return null;
+    return { lat: r.latitude, lon: r.longitude };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchWeather(client: BridgethingClient, lat: number, lon: number, unit: Unit): Promise<Weather> {
   const imperial = unit === 'F';
   const url =
@@ -237,6 +257,16 @@ function hm(s: string | null): number | null {
   return h * 60 + m;
 }
 
+// Embedded Chromium builds often ship without full ICU timezone data, so
+// Intl/toLocaleString with a `timeZone` option can throw and crash the render.
+// Shift the epoch by the daemon's plain numeric offset instead, then read the
+// wall clock back out with the UTC getters -- no Intl involved at all.
+function localNow(time: TimeInfo | null): Date {
+  const driftMs = time?.wallClockUnixS ? time.wallClockUnixS * 1000 - Date.now() : 0;
+  const offsetMin = (time?.utcOffsetMinutes ?? -new Date().getTimezoneOffset()) + (time?.dstOffsetMinutes ?? 0);
+  return new Date(Date.now() + driftMs + offsetMin * 60000);
+}
+
 // clock ticks: 60 lines, every 5th longer and brighter, matching the real weatherstation dial.
 const TICKS = Array.from({ length: 60 }, (_, i) => {
   const a = (i * 6 * Math.PI) / 180;
@@ -252,16 +282,26 @@ const TICKS = Array.from({ length: 60 }, (_, i) => {
   };
 });
 
+type Theme = 'auto' | 'dark' | 'light';
+
 export default function App() {
   const client = useMemo(() => new BridgethingClient({ url: daemonUrl() }), []);
   const [conn, setConn] = useState<ConnectionState>(client.connectionState);
   const [time, setTime] = useState<TimeInfo | null>(null);
   const [place, setPlace] = useState('New York, NY');
-  const [lat, setLat] = useState(40.7128);
-  const [lon, setLon] = useState(-74.006);
-  const [unit, setUnit] = useState<Unit>('C');
+  const [fallbackLat, setFallbackLat] = useState(40.7128);
+  const [fallbackLon, setFallbackLon] = useState(-74.006);
+  const [geocoded, setGeocoded] = useState<{ lat: number; lon: number } | null>(null);
+  const [configUnit, setConfigUnit] = useState<Unit>('C');
+  const [unitOverride, setUnitOverride] = useState<Unit | null>(null);
+  const [themeConfig, setThemeConfig] = useState<Theme>('auto');
+  const [themeOverride, setThemeOverride] = useState<'dark' | 'light' | null>(null);
   const [weather, setWeather] = useState<Weather | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const unit = unitOverride ?? configUnit;
+  const lat = geocoded?.lat ?? fallbackLat;
+  const lon = geocoded?.lon ?? fallbackLon;
 
   useEffect(() => {
     const off = client.on(event => {
@@ -278,12 +318,15 @@ export default function App() {
     const applyConfig = (key: string, value: string | null) => {
       if (value == null) return;
       if (key === 'place') setPlace(value);
-      if (key === 'lat') setLat(Number(value));
-      if (key === 'lon') setLon(Number(value));
-      if (key === 'unit') setUnit(value === 'F' ? 'F' : 'C');
+      if (key === 'lat') setFallbackLat(Number(value));
+      if (key === 'lon') setFallbackLon(Number(value));
+      if (key === 'unit') setConfigUnit(value === 'F' ? 'F' : 'C');
+      if (key === 'theme') setThemeConfig(value === 'dark' || value === 'light' ? value : 'auto');
     };
     Promise.all(
-      ['place', 'lat', 'lon', 'unit'].map(key => client.config.get({ key }).then(r => r.ok && applyConfig(key, r.response.value))),
+      ['place', 'lat', 'lon', 'unit', 'theme'].map(key =>
+        client.config.get({ key }).then(r => r.ok && applyConfig(key, r.response.value)),
+      ),
     ).catch(() => {});
     const offConfig = client.config.onChanged(c => applyConfig(c.key, c.value));
 
@@ -293,6 +336,17 @@ export default function App() {
       offConfig();
     };
   }, [client]);
+
+  // resolve the typed place name to coordinates; falls back to the manual lat/lon config on failure.
+  useEffect(() => {
+    let cancelled = false;
+    geocodePlace(client, place).then(r => {
+      if (!cancelled && r) setGeocoded(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, place]);
 
   const refresh = useMemo(
     () => async () => {
@@ -308,40 +362,49 @@ export default function App() {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 3 * 60 * 1000);
+    const id = setInterval(refresh, error ? 30 * 1000 : 3 * 60 * 1000);
     return () => clearInterval(id);
-  }, [refresh]);
+  }, [refresh, error]);
 
-  // wall-clock: apply the daemon's drift + the configured location's IANA zone, since the Car
-  // Thing has no RTC and the browser's own zone is not the weather location's zone.
-  const tz = time?.tzIana ?? undefined;
-  const [now, setNow] = useState(() => new Date());
+  // physical buttons: 1/2 force dark/light, 4 clears back to the configured theme, 3 toggles unit.
   useEffect(() => {
-    const id = setInterval(() => {
-      const drift = time?.wallClockUnixS ? time.wallClockUnixS * 1000 - Date.now() : 0;
-      setNow(new Date(Date.now() + drift));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [time?.wallClockUnixS]);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === '1') setThemeOverride('dark');
+      if (e.key === '2') setThemeOverride('light');
+      if (e.key === '4') setThemeOverride(null);
+      if (e.key === '3') setUnitOverride(u => ((u ?? configUnit) === 'C' ? 'F' : 'C'));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [configUnit]);
 
-  const zoned = tz ? new Date(now.toLocaleString('en-US', { timeZone: tz })) : now;
-  const hh = zoned.getHours();
+  // wall-clock: shift the epoch by the daemon's numeric UTC+DST offset (not Intl/timeZone --
+  // an embedded Chromium build can ship without full ICU timezone data and throw on that).
+  const [now, setNow] = useState(() => localNow(null));
+  useEffect(() => {
+    const id = setInterval(() => setNow(localNow(time)), 1000);
+    return () => clearInterval(id);
+  }, [time]);
+
+  const hh = now.getUTCHours();
+  const minute = now.getUTCMinutes();
   const ap = hh < 12 ? 'AM' : 'PM';
   const displayHour = hh % 12 || 12;
-  const mm = String(zoned.getMinutes()).padStart(2, '0');
-  const dateStr = `${FDAY[zoned.getDay()]}, ${zoned.getDate()} ${FMON[zoned.getMonth()]}`;
+  const mm = String(minute).padStart(2, '0');
+  const dateStr = `${FDAY[now.getUTCDay()]}, ${now.getUTCDate()} ${FMON[now.getUTCMonth()]}`;
 
-  const nightNow = useMemo(() => {
+  const nightAuto = useMemo(() => {
     const rise = hm(weather?.sunrise ?? null);
     const set = hm(weather?.sunset ?? null);
     if (rise == null || set == null) return false;
-    const mins = zoned.getHours() * 60 + zoned.getMinutes();
+    const mins = hh * 60 + minute;
     return !(mins >= rise && mins < set);
-  }, [weather?.sunrise, weather?.sunset, zoned]);
+  }, [weather?.sunrise, weather?.sunset, hh, minute]);
 
+  const theme: 'dark' | 'light' = themeOverride ?? (themeConfig === 'auto' ? (nightAuto ? 'dark' : 'light') : themeConfig);
   useEffect(() => {
-    document.body.classList.toggle('light', !!weather && !nightNow);
-  }, [weather, nightNow]);
+    document.body.classList.toggle('light', theme === 'light');
+  }, [theme]);
 
   // hands are set imperatively so the 200ms sweep doesn't re-render the whole tree.
   const hourRef = useRef<SVGLineElement>(null);
@@ -349,22 +412,21 @@ export default function App() {
   const secRef = useRef<SVGLineElement>(null);
   useEffect(() => {
     const id = setInterval(() => {
-      const drift = time?.wallClockUnixS ? time.wallClockUnixS * 1000 - Date.now() : 0;
-      const d = tz ? new Date(new Date(Date.now() + drift).toLocaleString('en-US', { timeZone: tz })) : new Date(Date.now() + drift);
-      const s = d.getSeconds() + d.getMilliseconds() / 1000;
-      const m = d.getMinutes() + s / 60;
-      const h = (d.getHours() % 12) + m / 60;
+      const d = localNow(time);
+      const s = d.getUTCSeconds() + d.getUTCMilliseconds() / 1000;
+      const m = d.getUTCMinutes() + s / 60;
+      const h = (d.getUTCHours() % 12) + m / 60;
       hourRef.current?.setAttribute('transform', `rotate(${(h * 30).toFixed(2)} 100 100)`);
       minRef.current?.setAttribute('transform', `rotate(${(m * 6).toFixed(2)} 100 100)`);
       secRef.current?.setAttribute('transform', `rotate(${(s * 6).toFixed(2)} 100 100)`);
     }, 200);
     return () => clearInterval(id);
-  }, [time?.wallClockUnixS, tz]);
+  }, [time]);
 
   return (
     <div className="relative flex h-full w-full flex-col bg-bg text-fg">
-      <div className="absolute right-6 top-3 z-10 text-[13px] font-semibold text-sec">
-        {error ? `weather: ${error}` : conn !== 'open' ? conn : place}
+      <div className={'absolute right-6 top-3 z-10 text-[13px] font-semibold ' + (error ? 'text-[#ff453a]' : 'text-sec')}>
+        {error ? `weather unreachable: ${error}` : conn !== 'open' ? conn : place}
       </div>
 
       <div className="flex flex-1 items-center gap-8 px-10 pt-4">
@@ -377,7 +439,7 @@ export default function App() {
 
           <div className="mt-6 flex flex-col items-start">
             <div className="flex items-center gap-4">
-              <WeatherIcon icon={weather?.icon ?? 'cloud'} night={nightNow} className="h-[66px] w-[66px]" />
+              <WeatherIcon icon={weather?.icon ?? 'cloud'} night={theme === 'dark'} className="h-[66px] w-[66px]" />
               <span className="text-[74px] font-semibold leading-none tracking-[-3px]">
                 {weather ? weather.temp : '--'}°
               </span>

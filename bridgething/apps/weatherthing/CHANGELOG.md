@@ -1,5 +1,9 @@
 # WeatherThing
 
+## 0.2.0
+
+fix a real-hardware crash in the clock/analog hands, add location search, theme + button controls
+
 ## 0.1.1
 
 match the real WeatherThing look: big digital clock, analog clock, colored weather icons
