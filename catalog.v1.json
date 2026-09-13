@@ -1,7 +1,7 @@
 {
   "$schema": "https://apps.bridgething.com/schemas/catalog/v1.json",
   "schema": "catalog.v1",
-  "updated_at": "2026-09-13T22:52:28.222Z",
+  "updated_at": "2026-09-13T23:15:22.355Z",
   "repo": {
     "name": "BirdThing",
     "description": "Bird identification from a BirdNET-Pi, for the Spotify Car Thing.",
@@ -19,21 +19,21 @@
       "source": "https://github.com/nagarajan1295/BirdThing",
       "versions": [
         {
-          "version": "0.2.0",
-          "released_at": "2026-09-13T22:52:27.216Z",
+          "version": "0.2.1",
+          "released_at": "2026-09-13T23:15:21.299Z",
           "download": {
-            "url": "https://nagarajan1295.github.io/BirdThing/r/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.2.0.zip",
-            "size": 800700,
-            "sha256": "f783fb8e498e6f6118a7eb733e77f183bbda154c26a297140818d4dd07c3cc3d"
+            "url": "https://nagarajan1295.github.io/BirdThing/r/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.2.1.zip",
+            "size": 800908,
+            "sha256": "a53b0483d2c1d1b836d31bce5f42b5e8ff5190e65052d5063500224678c7a9c5"
           },
           "settings": {
-            "url": "https://nagarajan1295.github.io/BirdThing/s/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.2.0.html",
+            "url": "https://nagarajan1295.github.io/BirdThing/s/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.2.1.html",
             "size": 26933,
             "sha256": "3bedec385216385c8726892c1c58b9ecac74fa380ed097c799e8c64d3a3b4b59"
           },
           "permissions": [],
           "min_libbridgething_version": "0.12.1",
-          "changelog": "no BirdNET-Pi needed: a live demo mode with real Wikipedia photos, on by default until you set a host"
+          "changelog": "fix the same clock-freezing drift-math bug as weatherthing"
         }
       ]
     },
@@ -47,21 +47,21 @@
       "source": "https://github.com/nagarajan1295/BirdThing",
       "versions": [
         {
-          "version": "0.2.0",
-          "released_at": "2026-09-13T22:52:28.220Z",
+          "version": "0.2.1",
+          "released_at": "2026-09-13T23:15:22.353Z",
           "download": {
-            "url": "https://nagarajan1295.github.io/BirdThing/r/01a09688-246b-705e-9856-a847d1c0573c/0.2.0.zip",
-            "size": 800026,
-            "sha256": "22072698584249a34ed8b145826398135845e27d24fdf528fef869b4eead65cc"
+            "url": "https://nagarajan1295.github.io/BirdThing/r/01a09688-246b-705e-9856-a847d1c0573c/0.2.1.zip",
+            "size": 803063,
+            "sha256": "fd57cf590fb82cfabf8c1838088b4245005c3921fd3851290cdf6dedbb0284e8"
           },
           "settings": {
-            "url": "https://nagarajan1295.github.io/BirdThing/s/01a09688-246b-705e-9856-a847d1c0573c/0.2.0.html",
+            "url": "https://nagarajan1295.github.io/BirdThing/s/01a09688-246b-705e-9856-a847d1c0573c/0.2.1.html",
             "size": 26927,
             "sha256": "1faf6a0bce4cc84dab889b6acd5230e7f540bf75a1787ada661910ea127e50b1"
           },
           "permissions": [],
           "min_libbridgething_version": "0.12.1",
-          "changelog": "fix a real-hardware crash in the clock/analog hands, add location search, theme + button controls"
+          "changelog": "fix the clock/analog hands actually being frozen (a drift-math bug that cancelled Date.now() out entirely); add an on-device settings screen (button 4): location presets via the knob, unit and theme status"
         }
       ]
     }
