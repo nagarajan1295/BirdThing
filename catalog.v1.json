@@ -1,54 +1,31 @@
 {
   "$schema": "https://apps.bridgething.com/schemas/catalog/v1.json",
   "schema": "catalog.v1",
-  "updated_at": "2026-09-13T23:15:22.355Z",
+  "updated_at": "2026-09-13T23:52:25.536Z",
   "repo": {
     "name": "BirdThing",
-    "description": "Bird identification from a BirdNET-Pi, for the Spotify Car Thing.",
+    "description": "WeatherThing: a clock and weather station for the Spotify Car Thing.",
     "homepage": "https://github.com/nagarajan1295/BirdThing",
     "icon": null
   },
   "apps": [
-    {
-      "id": "01a09675-e7fe-77c4-8edf-38ec1be76afb",
-      "name": "BirdThing",
-      "description": "Bird identifications on your Car Thing's screen -- works standalone with demo data, or live from your own BirdNET-Pi.",
-      "author": "Naga",
-      "icon": "https://nagarajan1295.github.io/BirdThing/icons/01a09675-e7fe-77c4-8edf-38ec1be76afb.png",
-      "homepage": "https://github.com/nagarajan1295/BirdThing",
-      "source": "https://github.com/nagarajan1295/BirdThing",
-      "versions": [
-        {
-          "version": "0.2.1",
-          "released_at": "2026-09-13T23:15:21.299Z",
-          "download": {
-            "url": "https://nagarajan1295.github.io/BirdThing/r/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.2.1.zip",
-            "size": 800908,
-            "sha256": "a53b0483d2c1d1b836d31bce5f42b5e8ff5190e65052d5063500224678c7a9c5"
-          },
-          "settings": {
-            "url": "https://nagarajan1295.github.io/BirdThing/s/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.2.1.html",
-            "size": 26933,
-            "sha256": "3bedec385216385c8726892c1c58b9ecac74fa380ed097c799e8c64d3a3b4b59"
-          },
-          "permissions": [],
-          "min_libbridgething_version": "0.12.1",
-          "changelog": "fix the same clock-freezing drift-math bug as weatherthing"
-        }
-      ]
-    },
     {
       "id": "01a09688-246b-705e-9856-a847d1c0573c",
       "name": "WeatherThing",
       "description": "A big digital and analog clock with current conditions and an hourly forecast strip.",
       "author": "Naga",
       "icon": "https://nagarajan1295.github.io/BirdThing/icons/01a09688-246b-705e-9856-a847d1c0573c.png",
+      "screenshots": [
+        "https://nagarajan1295.github.io/BirdThing/screenshots/01a09688-246b-705e-9856-a847d1c0573c/01.png",
+        "https://nagarajan1295.github.io/BirdThing/screenshots/01a09688-246b-705e-9856-a847d1c0573c/02.png",
+        "https://nagarajan1295.github.io/BirdThing/screenshots/01a09688-246b-705e-9856-a847d1c0573c/03.png"
+      ],
       "homepage": "https://github.com/nagarajan1295/BirdThing",
       "source": "https://github.com/nagarajan1295/BirdThing",
       "versions": [
         {
           "version": "0.2.1",
-          "released_at": "2026-09-13T23:15:22.353Z",
+          "released_at": "2026-09-13T23:52:25.475Z",
           "download": {
             "url": "https://nagarajan1295.github.io/BirdThing/r/01a09688-246b-705e-9856-a847d1c0573c/0.2.1.zip",
             "size": 803063,

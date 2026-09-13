@@ -1,20 +1,7 @@
 {
-  "01a09675-e7fe-77c4-8edf-38ec1be76afb": {
-    "0.2.1": {
-      "released_at": "2026-09-13T23:15:21.299Z",
-      "sha256": "a53b0483d2c1d1b836d31bce5f42b5e8ff5190e65052d5063500224678c7a9c5",
-      "size": 800908,
-      "file": "r/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.2.1.zip",
-      "settings": {
-        "file": "s/01a09675-e7fe-77c4-8edf-38ec1be76afb/0.2.1.html",
-        "size": 26933,
-        "sha256": "3bedec385216385c8726892c1c58b9ecac74fa380ed097c799e8c64d3a3b4b59"
-      }
-    }
-  },
   "01a09688-246b-705e-9856-a847d1c0573c": {
     "0.2.1": {
-      "released_at": "2026-09-13T23:15:22.353Z",
+      "released_at": "2026-09-13T23:52:25.475Z",
       "sha256": "fd57cf590fb82cfabf8c1838088b4245005c3921fd3851290cdf6dedbb0284e8",
       "size": 803063,
       "file": "r/01a09688-246b-705e-9856-a847d1c0573c/0.2.1.zip",
