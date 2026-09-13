@@ -1,6 +1,6 @@
 {
   "name": "BirdThing",
-  "description": "Bird identification from a BirdNET-Pi, for the Spotify Car Thing.",
+  "description": "WeatherThing: a clock and weather station for the Spotify Car Thing.",
   "homepage": "https://github.com/nagarajan1295/BirdThing",
   "icon": null,
   "base_url": "https://nagarajan1295.github.io/BirdThing",
