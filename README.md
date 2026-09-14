@@ -1,3 +1,25 @@
+# 🌤️ WeatherThing
+
+A clock and weather station for the [Spotify Car Thing](https://bridgething.com), built for the
+[bridgething app jam](https://bridgething.com/appjam/). A big digital clock, a faithful 292px
+analog clock with a sweeping second hand, current conditions and an hourly forecast from
+Open‑Meteo (no Raspberry Pi needed — just a paired phone or desktop with internet), the original
+multi‑tone weather icons, and an on‑device settings screen (physical button 4).
+
+**Install:** paste this catalog URL into the bridgething companion app —
+`https://nagarajan1295.github.io/BirdThing/catalog.v1.json`
+
+**Source:** [`bridgething/apps/weatherthing`](bridgething/apps/weatherthing)
+
+| Night (auto dark) | Day (auto light) | On‑device settings |
+|---|---|---|
+| ![WeatherThing at night](bridgething/apps/weatherthing/screenshots/01.png) | ![WeatherThing by day](bridgething/apps/weatherthing/screenshots/02.png) | ![WeatherThing settings screen](bridgething/apps/weatherthing/screenshots/03.png) |
+
+Controls: buttons **1**/**2** force dark/light theme, **3** toggles °C/°F, **4** opens settings
+(knob‑scrollable location list). Theme auto‑switches on real sunrise/sunset when left on auto.
+
+---
+
 # 🐦 BirdThing
 
 Turn a **Spotify Car Thing** into a live bird‑identification display. The Car Thing sits at a
@@ -110,20 +132,11 @@ docs/        setup guide, architecture, Bluetooth plan, screenshots
 bridgething/ the WeatherThing webapp for bridgething (see below)
 ```
 
-## WeatherThing on bridgething
+## Building WeatherThing from source
 
-[bridgething](https://bridgething.com) is a community daemon/OS for the Car Thing
-that replaces Nocturne with a webapp platform (React + a typed client over
-WebSocket) — see [bridgething/](bridgething/), a catalog entry for the
-[bridgething app jam](https://bridgething.com/appjam/):
-
-**`apps/weatherthing`** is a clock/weather station: a big digital clock and a
-faithful 292px analog clock (from `client.time`, since the Car Thing has no
-RTC), current conditions and an hourly forecast straight from Open‑Meteo (no
-Pi needed — just a connected phone with internet), the original multi‑tone
-line-SVG weather icons, and an on‑device settings screen (button 4) with a
-knob-scrollable location picker. Buttons 1/2 force dark/light theme, 3 toggles
-the temperature unit.
+[bridgething](https://bridgething.com) is a community daemon/OS for the Car Thing that replaces
+Nocturne with a webapp platform (React + a typed client over WebSocket). WeatherThing's
+description and screenshots are at the top of this README; here's the dev workflow:
 
 ```bash
 cd bridgething

@@ -1,7 +1,7 @@
 {
   "author": "Naga",
-  "homepage": "https://github.com/nagarajan1295/BirdThing",
-  "source": "https://github.com/nagarajan1295/BirdThing",
+  "homepage": "https://github.com/nagarajan1295/BirdThing/tree/master/bridgething/apps/weatherthing",
+  "source": "https://github.com/nagarajan1295/BirdThing/tree/master/bridgething/apps/weatherthing",
   "icon": null,
   "screenshots": [],
   "min_libbridgething_version": "0.12.1"
