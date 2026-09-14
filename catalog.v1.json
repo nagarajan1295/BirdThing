@@ -1,7 +1,7 @@
 {
   "$schema": "https://apps.bridgething.com/schemas/catalog/v1.json",
   "schema": "catalog.v1",
-  "updated_at": "2026-09-13T23:52:25.536Z",
+  "updated_at": "2026-09-14T00:40:22.866Z",
   "repo": {
     "name": "BirdThing",
     "description": "WeatherThing: a clock and weather station for the Spotify Car Thing.",
@@ -20,12 +20,12 @@
         "https://nagarajan1295.github.io/BirdThing/screenshots/01a09688-246b-705e-9856-a847d1c0573c/02.png",
         "https://nagarajan1295.github.io/BirdThing/screenshots/01a09688-246b-705e-9856-a847d1c0573c/03.png"
       ],
-      "homepage": "https://github.com/nagarajan1295/BirdThing",
-      "source": "https://github.com/nagarajan1295/BirdThing",
+      "homepage": "https://github.com/nagarajan1295/BirdThing/tree/master/bridgething/apps/weatherthing",
+      "source": "https://github.com/nagarajan1295/BirdThing/tree/master/bridgething/apps/weatherthing",
       "versions": [
         {
           "version": "0.2.1",
-          "released_at": "2026-09-13T23:52:25.475Z",
+          "released_at": "2026-09-14T00:40:22.862Z",
           "download": {
             "url": "https://nagarajan1295.github.io/BirdThing/r/01a09688-246b-705e-9856-a847d1c0573c/0.2.1.zip",
             "size": 803063,
