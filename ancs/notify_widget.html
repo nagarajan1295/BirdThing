@@ -187,6 +187,10 @@
     transition:transform .2s ease;touch-action:pan-y;}
   body.light #ancsCtr .ctr-row,#ancsCtr.light .ctr-row{background:#e8e8ea;}
   #ancsCtr .ctr-row.dragging{transition:none;}
+  /* knob-scroll focus ring - only visible while the knob is being used to
+     move through the list, matches the accent used elsewhere for selection */
+  #ancsCtr .ctr-row.focused{box-shadow:0 0 0 calc(2px*var(--s,1)) #0a84ff inset;}
+  body.light #ancsCtr .ctr-row.focused,#ancsCtr.light .ctr-row.focused{box-shadow:0 0 0 calc(2px*var(--s,1)) #007aff inset;}
   #ancsCtr .ctr-msg.expanded{-webkit-line-clamp:unset;}
   #ancsCtr .ctr-clearall{flex:0 0 auto;align-self:center;margin:calc(4px*var(--s,1)) 0 0;
     padding:calc(9px*var(--s,1)) calc(18px*var(--s,1));border-radius:999px;border:0;
@@ -428,7 +432,7 @@
     document.body.appendChild(ctrBack);
     document.body.appendChild(ctr);
 
-    ctrBack.addEventListener('click', closeCenter);
+    ctrBack.addEventListener('click', function(){ closeCenter(false); });
     ctr.addEventListener('click', function(e){ e.stopPropagation(); });
 
     // Swipe DOWN starting in the top-right corner -> open. Listeners are on
@@ -453,14 +457,54 @@
   function openCenter(){
     if (!ctr) return;
     ctrOpen = true;
+    ctrFocusIdx = 0;
     renderCenter(ctrItems);
     ctr.classList.add('open'); ctrBack.classList.add('open');
   }
-  function closeCenter(){
+  function closeCenter(goHome){
     ctrOpen = false;
     if (ctr) { ctr.classList.remove('open'); ctrBack.classList.remove('open'); }
+    // The physical "back" button (Escape, distinct from the knob's own
+    // press/Enter) both closes this overlay AND drops whatever the host page
+    // was showing underneath back to its home/live view - not just whatever
+    // view happened to be open behind the notification centre.
+    if (goHome) {
+      try {
+        if (typeof closeAllOverlays === 'function') closeAllOverlays();
+        if (typeof goLive === 'function') goLive();
+      } catch (e) {}
+    }
   }
-  function toggleCenter(){ ctrOpen ? closeCenter() : openCenter(); }
+  function toggleCenter(){ ctrOpen ? closeCenter(false) : openCenter(); }
+
+  // ---- knob navigation while the centre is open ----------------------------
+  // Rotation is bridged in as ArrowUp/ArrowDown key events (same mechanism the
+  // host page's own knob-scroll uses); the knob's own press arrives as Enter;
+  // the separate physical button below the knob arrives as Escape. Captured
+  // (not bubble phase) and stopped here so none of it also reaches the host
+  // page's keydown handler while the centre is on screen.
+  var ctrFocusIdx = 0, ctrRows = [];
+  function ctrApplyFocus(){
+    ctrRows.forEach(function(r, i){ r.classList.toggle('focused', i === ctrFocusIdx); });
+    if (ctrRows[ctrFocusIdx]) ctrRows[ctrFocusIdx].scrollIntoView({block: 'nearest', behavior: 'smooth'});
+  }
+  function ctrMoveFocus(delta){
+    if (!ctrRows.length) return;
+    ctrFocusIdx = Math.max(0, Math.min(ctrRows.length - 1, ctrFocusIdx + delta));
+    ctrApplyFocus();
+  }
+  document.addEventListener('keydown', function(e){
+    if (!ctrOpen) return;
+    var k = e.key;
+    if (k !== 'ArrowDown' && k !== 'ArrowUp' && k !== 'Escape' && k !== 'Backspace' && k !== 'Enter') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    if (k === 'Escape' || k === 'Backspace') { closeCenter(true); return; }
+    if (k === 'ArrowDown') { ctrMoveFocus(1); return; }
+    if (k === 'ArrowUp') { ctrMoveFocus(-1); return; }
+    if (k === 'Enter' && ctrRows[ctrFocusIdx]) { ctrRows[ctrFocusIdx].click(); return; }
+  }, true);
 
   // "Clear" a display-side dismiss - hides it here (and, once the next poll
   // lands on every screen, everywhere) but CANNOT reach the phone's own
@@ -481,6 +525,7 @@
     var live = ctrItems.filter(function(n){
       return !n.removed_ts && n.active !== false && !n.dismissed_ts && !n._dismissedLocal;
     });
+    ctrRows = [];
     if (!live.length) {
       ctrList.innerHTML = '<div class="ctr-empty">No notifications</div>';
       return;
@@ -537,7 +582,11 @@
       }, {passive:true});
       wrap2.appendChild(bg); wrap2.appendChild(row);
       ctrList.appendChild(wrap2);
+      ctrRows.push(row);
     });
+    if (ctrFocusIdx >= ctrRows.length) ctrFocusIdx = ctrRows.length - 1;
+    if (ctrFocusIdx < 0) ctrFocusIdx = 0;
+    ctrApplyFocus();
   }
 
   function build(n, full){
