@@ -168,6 +168,7 @@ const FMON = [
 ];
 
 type Hour = { t: string; temp: number; icon: string };
+type Day = { date: string; dow: string; icon: string; hi: number; lo: number };
 type Weather = {
   temp: number;
   desc: string;
@@ -175,27 +176,35 @@ type Weather = {
   hi: number;
   lo: number;
   hourly: Hour[];
+  daily: Day[];
   sunrise: string | null;
   sunset: string | null;
 };
 
-async function geocodePlace(client: BridgethingClient, place: string): Promise<{ lat: number; lon: number } | null> {
-  if (!place.trim()) return null;
+const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+type GeocodeResult = { ok: true; lat: number; lon: number } | { ok: false; reason: string };
+
+async function geocodePlace(client: BridgethingClient, place: string): Promise<GeocodeResult> {
+  if (!place.trim()) return { ok: false, reason: 'empty' };
   const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(place)}&count=1&language=en&format=json`;
   try {
     const res = await client.net.fetch({
       request: { url, method: 'GET', headers: [], body: null, timeoutMs: 8000, redirect: 'follow' },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const reason = res.kind === 'domain' ? res.error.error.type : res.error.type;
+      return { ok: false, reason };
+    }
     const { status, body } = res.response.response;
-    if (status < 200 || status >= 300) return null;
+    if (status < 200 || status >= 300) return { ok: false, reason: `http ${status}` };
     const bytes = new Uint8Array(body as unknown as number[]);
     const d = JSON.parse(new TextDecoder().decode(bytes));
     const r = d.results?.[0];
-    if (!r) return null;
-    return { lat: r.latitude, lon: r.longitude };
-  } catch {
-    return null;
+    if (!r) return { ok: false, reason: 'not found' };
+    return { ok: true, lat: r.latitude, lon: r.longitude };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -206,7 +215,7 @@ async function fetchWeather(client: BridgethingClient, lat: number, lon: number,
     `&current=temperature_2m,weather_code` +
     `&hourly=temperature_2m,weather_code` +
     `&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset` +
-    `&forecast_days=2&timezone=auto` +
+    `&forecast_days=7&timezone=auto` +
     `&temperature_unit=${imperial ? 'fahrenheit' : 'celsius'}`;
   const res = await client.net.fetch({
     request: { url, method: 'GET', headers: [], body: null, timeoutMs: 8000, redirect: 'follow' },
@@ -231,6 +240,11 @@ async function fetchWeather(client: BridgethingClient, lat: number, lon: number,
     hourly.push({ t: H.time[i].slice(11, 16), temp: Math.round(H.temperature_2m[i]), icon: wmo(H.weather_code[i])[0] });
   }
   const DD = d.daily;
+  const daily: Day[] = (DD.time as string[]).map((date, i) => {
+    const [y, mo, da] = date.split('-').map(Number);
+    const dow = DOW_SHORT[new Date(Date.UTC(y, mo - 1, da)).getUTCDay()];
+    return { date, dow, icon: wmo(DD.weather_code[i])[0], hi: Math.round(DD.temperature_2m_max[i]), lo: Math.round(DD.temperature_2m_min[i]) };
+  });
 
   return {
     temp: Math.round(cur.temperature_2m),
@@ -239,6 +253,7 @@ async function fetchWeather(client: BridgethingClient, lat: number, lon: number,
     hi: Math.round(DD.temperature_2m_max[0]),
     lo: Math.round(DD.temperature_2m_min[0]),
     hourly,
+    daily,
     sunrise: DD.sunrise?.[0]?.slice(11, 16) ?? null,
     sunset: DD.sunset?.[0]?.slice(11, 16) ?? null,
   };
@@ -311,6 +326,8 @@ const PRESET_PLACES: { name: string; lat: number; lon: number }[] = [
   { name: 'Toronto, Canada', lat: 43.6532, lon: -79.3832 },
 ];
 
+type Mode = 'home' | 'settings' | 'forecast' | 'standby';
+
 export default function App() {
   const client = useMemo(() => new BridgethingClient({ url: daemonUrl() }), []);
   const [conn, setConn] = useState<ConnectionState>(client.connectionState);
@@ -319,6 +336,7 @@ export default function App() {
   const [fallbackLat, setFallbackLat] = useState(40.7128);
   const [fallbackLon, setFallbackLon] = useState(-74.006);
   const [geocoded, setGeocoded] = useState<{ lat: number; lon: number } | null>(null);
+  const [geoError, setGeoError] = useState<string | null>(null);
   const [configUnit, setConfigUnit] = useState<Unit>('C');
   const [unitOverride, setUnitOverride] = useState<Unit | null>(null);
   const [themeConfig, setThemeConfig] = useState<Theme>('auto');
@@ -326,7 +344,7 @@ export default function App() {
   const [weather, setWeather] = useState<Weather | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [presetIndex, setPresetIndex] = useState<number | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  const [mode, setMode] = useState<Mode>('home');
 
   const unit = unitOverride ?? configUnit;
   const preset = presetIndex != null ? PRESET_PLACES[presetIndex] : null;
@@ -334,8 +352,9 @@ export default function App() {
   const lon = preset?.lon ?? geocoded?.lon ?? fallbackLon;
   const placeLabel = preset?.name ?? place;
 
-  // an on-device location pick (button 4 + wheel) persists locally across restarts, independent
-  // of the companion app's config -- so it works even if that settings screen isn't reachable.
+  // an on-device location pick (mode button + wheel) persists locally across restarts as a
+  // convenience, but a real place typed into the companion app always wins: see the
+  // client.config.onChanged handler below, which clears this the moment `place` actually changes.
   useEffect(() => {
     client.store
       .get({ key: 'presetPlaceIndex' })
@@ -345,7 +364,10 @@ export default function App() {
       .catch(() => {});
   }, [client]);
   useEffect(() => {
-    if (presetIndex == null) return;
+    if (presetIndex == null) {
+      client.store.delete({ key: 'presetPlaceIndex' }).catch(() => {});
+      return;
+    }
     client.store.put({ key: 'presetPlaceIndex', value: String(presetIndex) }).catch(() => {});
   }, [client, presetIndex]);
 
@@ -374,7 +396,13 @@ export default function App() {
         client.config.get({ key }).then(r => r.ok && applyConfig(key, r.response.value)),
       ),
     ).catch(() => {});
-    const offConfig = client.config.onChanged(c => applyConfig(c.key, c.value));
+    // onChanged only fires on a REAL edit (not the initial hydration above), so this is exactly
+    // the signal that the companion app just set a new place -- clear the on-device preset so
+    // the typed location takes over immediately instead of being silently overridden by it.
+    const offConfig = client.config.onChanged(c => {
+      if (c.key === 'place') setPresetIndex(null);
+      applyConfig(c.key, c.value);
+    });
 
     return () => {
       off();
@@ -385,14 +413,18 @@ export default function App() {
 
   // resolve the typed place name to coordinates; falls back to the manual lat/lon config on failure.
   useEffect(() => {
+    if (preset) return; // an on-device pick already has coordinates, no geocoding needed
     let cancelled = false;
+    setGeoError(null);
     geocodePlace(client, place).then(r => {
-      if (!cancelled && r) setGeocoded(r);
+      if (cancelled) return;
+      if (r.ok) setGeocoded({ lat: r.lat, lon: r.lon });
+      else setGeoError(r.reason === 'not found' ? `couldn't find "${place}"` : `location lookup failed: ${r.reason}`);
     });
     return () => {
       cancelled = true;
     };
-  }, [client, place]);
+  }, [client, place, preset]);
 
   const refresh = useMemo(
     () => async () => {
@@ -411,42 +443,6 @@ export default function App() {
     const id = setInterval(refresh, error ? 30 * 1000 : 3 * 60 * 1000);
     return () => clearInterval(id);
   }, [refresh, error]);
-
-  // physical buttons: 1/2 force dark/light, 3 toggles unit, 4 opens/closes on-device settings.
-  // escape closes settings if open, else clears the theme override back to auto. the wheel
-  // cycles the location preset while settings is open.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === '1') setThemeOverride('dark');
-      if (e.key === '2') setThemeOverride('light');
-      if (e.key === '3') setUnitOverride(u => ((u ?? configUnit) === 'C' ? 'F' : 'C'));
-      if (e.key === '4') setShowSettings(s => !s);
-      if (e.key === 'Escape') {
-        if (showSettings) setShowSettings(false);
-        else setThemeOverride(null);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [configUnit, showSettings]);
-
-  const wheelAccum = useRef(0);
-  useEffect(() => {
-    const onWheel = (e: WheelEvent) => {
-      if (!showSettings) return;
-      wheelAccum.current += e.deltaX;
-      while (Math.abs(wheelAccum.current) >= 40) {
-        const dir = wheelAccum.current > 0 ? 1 : -1;
-        setPresetIndex(i => {
-          const base = i ?? 0;
-          return (base + dir + PRESET_PLACES.length) % PRESET_PLACES.length;
-        });
-        wheelAccum.current -= dir * 40;
-      }
-    };
-    window.addEventListener('wheel', onWheel);
-    return () => window.removeEventListener('wheel', onWheel);
-  }, [showSettings]);
 
   // wall-clock: shift the epoch by the daemon's numeric UTC+DST offset (not Intl/timeZone --
   // an embedded Chromium build can ship without full ICU timezone data and throw on that).
@@ -480,6 +476,74 @@ export default function App() {
     document.body.classList.toggle('light', theme === 'light');
   }, [theme]);
 
+  // physical buttons: 1 toggles dark/light, 2 toggles C/F, 3 opens the 7-day forecast, 4 enters
+  // standby (dim, clock + temperature only), mode opens settings. any key wakes standby first
+  // instead of also performing its normal action, matching how a dimmed screen usually behaves.
+  // escape backs out of whatever's open; from home it clears the theme override back to auto.
+  // the wheel cycles the on-device location preset while settings is open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (mode === 'standby') {
+        setMode('home');
+        return;
+      }
+      if (e.key === '1') setThemeOverride(theme === 'dark' ? 'light' : 'dark');
+      if (e.key === '2') setUnitOverride(u => ((u ?? configUnit) === 'C' ? 'F' : 'C'));
+      if (e.key === '3') setMode(m => (m === 'forecast' ? 'home' : 'forecast'));
+      if (e.key === '4') setMode(m => (m === 'standby' ? 'home' : 'standby'));
+      if (e.key === 'm') setMode(m => (m === 'settings' ? 'home' : 'settings'));
+      if (e.key === 'Escape') {
+        if (mode === 'home') setThemeOverride(null);
+        else setMode('home');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [configUnit, mode, theme]);
+
+  const wheelAccum = useRef(0);
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (mode !== 'settings') return;
+      wheelAccum.current += e.deltaX;
+      while (Math.abs(wheelAccum.current) >= 40) {
+        const dir = wheelAccum.current > 0 ? 1 : -1;
+        setPresetIndex(i => {
+          const base = i ?? 0;
+          return (base + dir + PRESET_PLACES.length) % PRESET_PLACES.length;
+        });
+        wheelAccum.current -= dir * 40;
+      }
+    };
+    window.addEventListener('wheel', onWheel);
+    return () => window.removeEventListener('wheel', onWheel);
+  }, [mode]);
+
+  // standby dims the physical backlight, remembering whatever it was so leaving standby restores
+  // it exactly (auto mode, or a manual level) rather than assuming a specific default.
+  const prevBrightnessRef = useRef<{ mode: 'auto' | 'manual'; level: number } | null>(null);
+  useEffect(() => {
+    if (mode === 'standby') {
+      client.hardware
+        .stateGet()
+        .then(r => {
+          if (r.ok) prevBrightnessRef.current = r.response.state.brightness;
+        })
+        .catch(() => {});
+      // setLevel alone does nothing visible while the backlight is in auto mode -- effectiveLevel
+      // keeps following the ambient sensor. Standby needs manual mode explicitly.
+      client.hardware
+        .displaySetMode({ mode: 'manual' })
+        .then(() => client.hardware.displaySetLevel({ level: 0.08 }))
+        .catch(() => {});
+    } else if (prevBrightnessRef.current) {
+      const prev = prevBrightnessRef.current;
+      prevBrightnessRef.current = null;
+      if (prev.mode === 'auto') client.hardware.displaySetMode({ mode: 'auto' }).catch(() => {});
+      else client.hardware.displaySetLevel({ level: prev.level }).catch(() => {});
+    }
+  }, [client, mode]);
+
   // hands are set imperatively so the 200ms sweep doesn't re-render the whole tree.
   const hourRef = useRef<SVGLineElement>(null);
   const minRef = useRef<SVGLineElement>(null);
@@ -497,16 +561,31 @@ export default function App() {
     return () => clearInterval(id);
   }, [driftMs, offsetMin]);
 
+  if (mode === 'standby') {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-bg" onClick={() => setMode('home')}>
+        <div className="text-[96px] font-semibold leading-none tracking-[-4px] text-dim">
+          {displayHour}:{mm}
+          <span className="ml-2 text-[32px] font-medium text-dim">{ap}</span>
+        </div>
+        <div className="text-[42px] font-medium text-dim">{weather ? `${weather.temp}°` : '--°'}</div>
+        <div className="mt-6 text-[12px] font-semibold uppercase tracking-[0.1em] text-dim opacity-60">
+          press any button to wake
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex h-full w-full flex-col bg-bg text-fg">
       <div className={'absolute right-6 top-3 z-10 text-[13px] font-semibold ' + (error ? 'text-[#ff453a]' : 'text-sec')}>
         {error ? `weather unreachable: ${error}` : conn !== 'open' ? conn : placeLabel}
       </div>
       <div className="absolute left-6 top-3 z-10 text-[12px] font-semibold uppercase tracking-[0.08em] text-dim">
-        button 4: settings
+        1 theme · 2 °C/°F · 3 forecast · 4 standby · mode: settings
       </div>
 
-      {showSettings && (
+      {mode === 'settings' && (
         <div className="absolute inset-0 z-20 flex flex-col gap-6 bg-bg p-10">
           <div className="text-[27px] font-semibold">Settings</div>
 
@@ -516,24 +595,41 @@ export default function App() {
             <div className="mt-1 text-[14px] text-sec">
               or type a location in the companion app's settings for this app, which geocodes automatically
             </div>
+            {geoError && !preset && <div className="mt-1 text-[14px] text-[#ff453a]">{geoError}</div>}
           </div>
 
           <div>
-            <div className="text-[13px] font-semibold uppercase tracking-[0.1em] text-sec">Temperature unit -- button 3</div>
+            <div className="text-[13px] font-semibold uppercase tracking-[0.1em] text-sec">Temperature unit -- button 2</div>
             <div className="mt-2 text-[24px] font-semibold">{unit === 'F' ? 'Fahrenheit' : 'Celsius'}</div>
           </div>
 
           <div>
-            <div className="text-[13px] font-semibold uppercase tracking-[0.1em] text-sec">
-              Theme -- button 1 dark, button 2 light, escape for auto
-            </div>
+            <div className="text-[13px] font-semibold uppercase tracking-[0.1em] text-sec">Theme -- button 1 toggles, escape for auto</div>
             <div className="mt-2 text-[24px] font-semibold capitalize">
               {theme}
               {themeOverride == null && ' (auto)'}
             </div>
           </div>
 
-          <div className="mt-auto text-[14px] text-sec">press button 4 or escape to close</div>
+          <div className="mt-auto text-[14px] text-sec">press mode or escape to close</div>
+        </div>
+      )}
+
+      {mode === 'forecast' && (
+        <div className="absolute inset-0 z-20 flex flex-col gap-4 bg-bg p-10">
+          <div className="text-[27px] font-semibold">7-Day Forecast</div>
+          <div className="flex flex-1 items-stretch justify-between gap-2">
+            {(weather?.daily ?? []).map(d => (
+              <div key={d.date} className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl bg-card py-4">
+                <div className="text-[16px] font-semibold uppercase tracking-[0.05em] text-sec">{d.dow}</div>
+                <WeatherIcon icon={d.icon} className="h-10 w-10" />
+                <div className="text-[22px] font-semibold">{d.hi}°</div>
+                <div className="text-[16px] text-sec">{d.lo}°</div>
+              </div>
+            ))}
+            {!weather && <div className="flex flex-1 items-center justify-center text-sec">loading forecast...</div>}
+          </div>
+          <div className="text-[14px] text-sec">press button 3 or escape to close</div>
         </div>
       )}
 

@@ -13,8 +13,11 @@ multi‑tone weather icons, and an on‑device settings screen (physical button 
 |---|---|---|
 | ![WeatherThing at night](screenshots/01.png) | ![WeatherThing by day](screenshots/02.png) | ![WeatherThing settings screen](screenshots/03.png) |
 
-Controls: buttons **1**/**2** force dark/light theme, **3** toggles °C/°F, **4** opens settings
-(knob‑scrollable location list). Theme auto‑switches on real sunrise/sunset when left on auto.
+Controls: button **1** toggles dark/light, **2** toggles °C/°F, **3** opens a 7‑day forecast,
+**4** enters a dimmed standby (clock + temperature only, real backlight dimming), and **mode**
+opens on‑device settings (knob‑scrollable location list). Theme auto‑switches on real
+sunrise/sunset when left on auto. A location typed into the companion app's settings always
+takes over from an on‑device pick.
 
 ## Dev workflow
 
