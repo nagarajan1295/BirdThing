@@ -1,4 +1,4 @@
-import { BridgethingClient, type ConnectionState, type TimeInfo } from '@bridgething/client';
+import { BridgethingClient, type ConnectionState, type Notification, type Peer, type TimeInfo } from '@bridgething/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { daemonUrl } from './daemon';
 
@@ -183,6 +183,15 @@ type Weather = {
 
 const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+function BluetoothGlyph({ status }: { status: 'connected' | 'paired' | 'none' }) {
+  const color = status === 'connected' ? '#54c7ff' : status === 'paired' ? '#ffd60a' : 'var(--color-dim)';
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill={color}>
+      <path d="M13 5.83 14.88 7.7 13 9.59V5.83M13 14.41l1.88 1.88L13 18.17v-3.76M17.71 7.71 12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29Z" />
+    </svg>
+  );
+}
+
 type GeocodeResult = { ok: true; lat: number; lon: number } | { ok: false; reason: string };
 
 async function geocodePlace(client: BridgethingClient, place: string): Promise<GeocodeResult> {
@@ -326,7 +335,7 @@ const PRESET_PLACES: { name: string; lat: number; lon: number }[] = [
   { name: 'Toronto, Canada', lat: 43.6532, lon: -79.3832 },
 ];
 
-type Mode = 'home' | 'settings' | 'forecast' | 'standby';
+type Mode = 'home' | 'settings' | 'forecast' | 'standby' | 'notifications';
 
 export default function App() {
   const client = useMemo(() => new BridgethingClient({ url: daemonUrl() }), []);
@@ -345,6 +354,45 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [presetIndex, setPresetIndex] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>('home');
+  const [peers, setPeers] = useState<Peer[]>([]);
+  const [pressed, setPressed] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [refreshFlash, setRefreshFlash] = useState(false);
+
+  useEffect(() => {
+    const off = client.peer.onSnapshot(map => setPeers(Object.values(map)));
+    return off;
+  }, [client]);
+
+  // a peer can show companion.type 'connected' from Bluetooth pairing alone, with the actual
+  // companion APP not running on the phone -- capabilities is the true "is anything usable right
+  // now" signal, so require both before calling it fully connected.
+  const [capsReady, setCapsReady] = useState(false);
+  useEffect(() => {
+    client.capabilities
+      .get()
+      .then(r => r.ok && setCapsReady(r.response.capabilities.available.netFetch || r.response.capabilities.available.notifications))
+      .catch(() => {});
+    const off = client.capabilities.onSnapshot(c => setCapsReady(c.capabilities.available.netFetch || c.capabilities.available.notifications));
+    return off;
+  }, [client]);
+
+  // only ever holds notifications posted while this app has been running -- there is no
+  // "list what's already on the phone" request in the SDK, only live post/update/remove events.
+  useEffect(() => {
+    const offPosted = client.notifications.onPosted(n => setNotifications(prev => [n, ...prev.filter(p => p.id !== n.id)]));
+    const offUpdated = client.notifications.onUpdated(n => setNotifications(prev => prev.map(p => (p.id === n.id ? n : p))));
+    const offRemoved = client.notifications.onRemoved(({ id }) => setNotifications(prev => prev.filter(p => p.id !== id)));
+    return () => {
+      offPosted();
+      offUpdated();
+      offRemoved();
+    };
+  }, [client]);
+
+  const phonePeer = peers.find(p => p.device.type === 'android' || p.device.type === 'iOS') ?? null;
+  const phoneStatus: 'connected' | 'paired' | 'none' =
+    phonePeer?.companion.type === 'connected' && capsReady ? 'connected' : phonePeer ? 'paired' : 'none';
 
   const unit = unitOverride ?? configUnit;
   const preset = presetIndex != null ? PRESET_PLACES[presetIndex] : null;
@@ -481,8 +529,18 @@ export default function App() {
   // instead of also performing its normal action, matching how a dimmed screen usually behaves.
   // escape backs out of whatever's open; from home it clears the theme override back to auto.
   // the wheel cycles the on-device location preset while settings is open.
+  // a brief "pressed" pulse on the physical preset/mode buttons, like a volume HUD acknowledging
+  // the press -- purely cosmetic, applied as a transform in the JSX below.
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashPress = () => {
+    setPressed(true);
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = setTimeout(() => setPressed(false), 130);
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (['1', '2', '3', '4', 'm'].includes(e.key)) flashPress();
       if (mode === 'standby') {
         setMode('home');
         return;
@@ -518,6 +576,37 @@ export default function App() {
     window.addEventListener('wheel', onWheel);
     return () => window.removeEventListener('wheel', onWheel);
   }, [mode]);
+
+  // swipe down from the top edge: left half refreshes weather, right half opens the phone
+  // notification center. gated to starts near the top edge (not any downward drag anywhere) so
+  // it reads as a deliberate pull, the same gesture shape as a phone's control/notification center.
+  useEffect(() => {
+    let start: { x: number; y: number } | null = null;
+    const TOP_BAND = 70;
+    const THRESHOLD = 50;
+    const onDown = (e: PointerEvent) => {
+      start = e.clientY <= TOP_BAND ? { x: e.clientX, y: e.clientY } : null;
+    };
+    const onUp = (e: PointerEvent) => {
+      if (!start) return;
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      start = null;
+      if (dy < THRESHOLD || Math.abs(dx) > Math.abs(dy)) return;
+      if (e.clientX < 400) {
+        setRefreshFlash(true);
+        refresh().finally(() => setTimeout(() => setRefreshFlash(false), 600));
+      } else {
+        setMode('notifications');
+      }
+    };
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [refresh]);
 
   // standby dims the physical backlight, remembering whatever it was so leaving standby restores
   // it exactly (auto mode, or a manual level) rather than assuming a specific default.
@@ -568,7 +657,7 @@ export default function App() {
           {displayHour}:{mm}
           <span className="ml-2 text-[32px] font-medium text-dim">{ap}</span>
         </div>
-        <div className="text-[42px] font-medium text-dim">{weather ? `${weather.temp}°` : '--°'}</div>
+        <div className="text-[42px] font-medium text-dim">{weather ? `${weather.temp}°${unit}` : `--°${unit}`}</div>
         <div className="mt-6 text-[12px] font-semibold uppercase tracking-[0.1em] text-dim opacity-60">
           press any button to wake
         </div>
@@ -577,16 +666,24 @@ export default function App() {
   }
 
   return (
-    <div className="relative flex h-full w-full flex-col bg-bg text-fg">
-      <div className={'absolute right-6 top-3 z-10 text-[13px] font-semibold ' + (error ? 'text-[#ff453a]' : 'text-sec')}>
-        {error ? `weather unreachable: ${error}` : conn !== 'open' ? conn : placeLabel}
-      </div>
-      <div className="absolute left-6 top-3 z-10 text-[12px] font-semibold uppercase tracking-[0.08em] text-dim">
-        1 theme · 2 °C/°F · 3 forecast · 4 standby · mode: settings
+    <div
+      className="relative flex h-full w-full flex-col bg-bg text-fg transition-transform duration-100 ease-out"
+      style={pressed ? { transform: 'scale(0.985)', boxShadow: 'inset 0 0 40px rgba(0,0,0,0.5)' } : undefined}>
+      <div className="absolute right-6 top-3 z-10 flex items-center gap-2">
+        <BluetoothGlyph status={phoneStatus} />
+        <span className={'text-[13px] font-semibold ' + (error ? 'text-[#ff453a]' : 'text-sec')}>
+          {error ? `weather unreachable: ${error}` : conn !== 'open' ? conn : placeLabel}
+        </span>
       </div>
 
+      {refreshFlash && (
+        <div className="absolute left-1/2 top-3 z-30 -translate-x-1/2 text-[13px] font-semibold uppercase tracking-[0.08em] text-accent">
+          refreshing...
+        </div>
+      )}
+
       {mode === 'settings' && (
-        <div className="absolute inset-0 z-20 flex flex-col gap-6 bg-bg p-10">
+        <div className="absolute inset-0 z-20 flex flex-col gap-5 bg-bg p-10">
           <div className="text-[27px] font-semibold">Settings</div>
 
           <div>
@@ -611,7 +708,47 @@ export default function App() {
             </div>
           </div>
 
+          <div>
+            <div className="text-[13px] font-semibold uppercase tracking-[0.1em] text-sec">Phone</div>
+            <div className="mt-2 flex items-center gap-2 text-[24px] font-semibold">
+              <BluetoothGlyph status={phoneStatus} />
+              {phoneStatus === 'connected' && (phonePeer?.displayName ?? phonePeer?.device.name ?? 'Connected')}
+              {phoneStatus === 'paired' && `${phonePeer?.displayName ?? phonePeer?.device.name ?? 'Phone'} nearby, app not open`}
+              {phoneStatus === 'none' && 'Not paired'}
+            </div>
+            {phoneStatus === 'paired' && (
+              <div className="mt-1 text-[14px] text-sec">
+                bluetooth sees this phone, but the bridgething companion app isn't running on it right now -- open the
+                app on your phone for weather and notifications to work
+              </div>
+            )}
+          </div>
+
           <div className="mt-auto text-[14px] text-sec">press mode or escape to close</div>
+        </div>
+      )}
+
+      {mode === 'notifications' && (
+        <div className="absolute inset-0 z-20 flex flex-col gap-3 bg-bg p-10">
+          <div className="text-[27px] font-semibold">Notifications</div>
+          <div className="flex-1 overflow-hidden">
+            {notifications.length === 0 ? (
+              <div className="text-[16px] text-sec">nothing since this app started</div>
+            ) : (
+              <div className="flex h-full flex-col gap-3">
+                {notifications.slice(0, 6).map(n => (
+                  <div key={n.id} className="rounded-2xl bg-card px-4 py-3">
+                    <div className="text-[13px] font-semibold uppercase tracking-[0.05em] text-sec">
+                      {n.app.displayName ?? n.app.bundleId}
+                    </div>
+                    <div className="mt-1 text-[18px] font-semibold">{n.title ?? '(no title)'}</div>
+                    {n.message && <div className="mt-0.5 truncate text-[15px] text-sec">{n.message}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="text-[14px] text-sec">press escape to close</div>
         </div>
       )}
 
@@ -645,7 +782,7 @@ export default function App() {
             <div className="flex items-center gap-4">
               <WeatherIcon icon={weather?.icon ?? 'cloud'} night={theme === 'dark'} className="h-[66px] w-[66px]" />
               <span className="text-[74px] font-semibold leading-none tracking-[-3px]">
-                {weather ? weather.temp : '--'}°
+                {weather ? weather.temp : '--'}°{unit}
               </span>
             </div>
             <div className="mt-1 text-[21px] font-medium">{weather ? weather.desc : 'Connecting'}</div>

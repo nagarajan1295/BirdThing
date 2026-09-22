@@ -1,5 +1,9 @@
 # WeatherThing
 
+## 0.4.0
+
+remove the on-screen button legend, show unit letter even with no weather data, add a real phone/Bluetooth status glyph and settings row (distinguishing Bluetooth-paired-but-app-closed from genuinely connected), a button-press screen animation, and swipe gestures: top-left pulls to refresh, top-right opens a live notification center
+
 ## 0.3.0
 
 fix a real location bug (an on-device preset silently locked out the companion app's typed location forever), remap buttons (1 theme, 2 unit, 3 seven-day forecast, 4 standby with real backlight dimming, mode opens settings), and show real geocode errors instead of a misleading message
