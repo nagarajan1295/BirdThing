@@ -1,7 +1,7 @@
 {
   "$schema": "https://apps.bridgething.com/schemas/catalog/v1.json",
   "schema": "catalog.v1",
-  "updated_at": "2026-09-22T17:09:27.097Z",
+  "updated_at": "2026-09-22T17:37:49.788Z",
   "repo": {
     "name": "BirdThing",
     "description": "WeatherThing: a clock and weather station for the Spotify Car Thing.",
@@ -12,7 +12,7 @@
     {
       "id": "01a09688-246b-705e-9856-a847d1c0573c",
       "name": "WeatherThing",
-      "description": "A big digital and analog clock, current conditions, a 7-day forecast, and a dimmed standby mode.",
+      "description": "A big digital and analog clock, current conditions, a 7-day forecast, standby mode, and a phone notification center.",
       "author": "Naga",
       "icon": "https://nagarajan1295.github.io/BirdThing/icons/01a09688-246b-705e-9856-a847d1c0573c.png",
       "screenshots": [
@@ -24,21 +24,21 @@
       "source": "https://github.com/nagarajan1295/BirdThing/tree/master/bridgething/apps/weatherthing",
       "versions": [
         {
-          "version": "0.3.0",
-          "released_at": "2026-09-22T17:09:27.092Z",
+          "version": "0.4.0",
+          "released_at": "2026-09-22T17:37:49.785Z",
           "download": {
-            "url": "https://nagarajan1295.github.io/BirdThing/r/01a09688-246b-705e-9856-a847d1c0573c/0.3.0.zip",
-            "size": 805966,
-            "sha256": "0c75c2f43d61d3061bc091b853bf632f7f7856e23469e1d149e02dfcda2037a7"
+            "url": "https://nagarajan1295.github.io/BirdThing/r/01a09688-246b-705e-9856-a847d1c0573c/0.4.0.zip",
+            "size": 810064,
+            "sha256": "d2a15c304e8fa4a1bb9bfb4c74b1d809b3f7dc1e92f2ea525beb31c9f6d4b79f"
           },
           "settings": {
-            "url": "https://nagarajan1295.github.io/BirdThing/s/01a09688-246b-705e-9856-a847d1c0573c/0.3.0.html",
+            "url": "https://nagarajan1295.github.io/BirdThing/s/01a09688-246b-705e-9856-a847d1c0573c/0.4.0.html",
             "size": 26927,
             "sha256": "1faf6a0bce4cc84dab889b6acd5230e7f540bf75a1787ada661910ea127e50b1"
           },
           "permissions": [],
           "min_libbridgething_version": "0.12.1",
-          "changelog": "fix a real location bug (an on-device preset silently locked out the companion app's typed location forever), remap buttons (1 theme, 2 unit, 3 seven-day forecast, 4 standby with real backlight dimming, mode opens settings), and show real geocode errors instead of a misleading message"
+          "changelog": "remove the on-screen button legend, show unit letter even with no weather data, add a real phone/Bluetooth status glyph and settings row (distinguishing Bluetooth-paired-but-app-closed from genuinely connected), a button-press screen animation, and swipe gestures: top-left pulls to refresh, top-right opens a live notification center"
         }
       ]
     }
