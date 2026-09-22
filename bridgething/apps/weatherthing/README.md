@@ -9,9 +9,11 @@ multi‑tone weather icons, and an on‑device settings screen (physical button 
 **Install:** paste this catalog URL into the bridgething companion app —
 `https://nagarajan1295.github.io/BirdThing/catalog.v1.json`
 
-| Night (auto dark) | Day (auto light) | On‑device settings |
+| Day (auto light) | Settings + phone status | 7‑day forecast |
 |---|---|---|
-| ![WeatherThing at night](screenshots/01.png) | ![WeatherThing by day](screenshots/02.png) | ![WeatherThing settings screen](screenshots/03.png) |
+| ![WeatherThing by day](screenshots/01.png) | ![WeatherThing settings screen](screenshots/02.png) | ![WeatherThing 7-day forecast](screenshots/03.png) |
+| **Notification center** | **Standby** | **Night (auto dark)** |
+| ![WeatherThing notification center](screenshots/04.png) | ![WeatherThing standby mode](screenshots/05.png) | ![WeatherThing at night](screenshots/06.png) |
 
 Controls: button **1** toggles dark/light, **2** toggles °C/°F, **3** opens a 7‑day forecast,
 **4** enters a dimmed standby (clock + temperature only, real backlight dimming), and **mode**

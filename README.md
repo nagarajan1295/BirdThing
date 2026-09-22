@@ -11,9 +11,11 @@ multi‑tone weather icons, and an on‑device settings screen (physical button 
 
 **Source:** [`bridgething/apps/weatherthing`](bridgething/apps/weatherthing)
 
-| Night (auto dark) | Day (auto light) | On‑device settings |
+| Day (auto light) | Settings + phone status | 7‑day forecast |
 |---|---|---|
-| ![WeatherThing at night](bridgething/apps/weatherthing/screenshots/01.png) | ![WeatherThing by day](bridgething/apps/weatherthing/screenshots/02.png) | ![WeatherThing settings screen](bridgething/apps/weatherthing/screenshots/03.png) |
+| ![WeatherThing by day](bridgething/apps/weatherthing/screenshots/01.png) | ![WeatherThing settings screen](bridgething/apps/weatherthing/screenshots/02.png) | ![WeatherThing 7-day forecast](bridgething/apps/weatherthing/screenshots/03.png) |
+| **Notification center** | **Standby** | **Night (auto dark)** |
+| ![WeatherThing notification center](bridgething/apps/weatherthing/screenshots/04.png) | ![WeatherThing standby mode](bridgething/apps/weatherthing/screenshots/05.png) | ![WeatherThing at night](bridgething/apps/weatherthing/screenshots/06.png) |
 
 Controls: button **1** toggles dark/light, **2** toggles °C/°F, **3** opens a 7‑day forecast,
 **4** enters a dimmed standby (clock + temperature only, real backlight dimming), and **mode**
