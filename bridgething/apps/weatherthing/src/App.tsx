@@ -1,5 +1,5 @@
 import { BridgethingClient, type ConnectionState, type Notification, type Peer, type TimeInfo } from '@bridgething/client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { daemonUrl } from './daemon';
 
 type Unit = 'C' | 'F';
@@ -167,7 +167,7 @@ const FMON = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-type Hour = { t: string; temp: number; icon: string };
+type Hour = { t: string; temp: number; icon: string; precipProb: number; precip: number; snow: number };
 type Day = { date: string; dow: string; icon: string; hi: number; lo: number };
 type Weather = {
   temp: number;
@@ -177,6 +177,7 @@ type Weather = {
   lo: number;
   hourly: Hour[];
   daily: Day[];
+  dailyHourly: Record<string, Hour[]>;
   sunrise: string | null;
   sunset: string | null;
 };
@@ -222,7 +223,7 @@ async function fetchWeather(client: BridgethingClient, lat: number, lon: number,
   const url =
     `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
     `&current=temperature_2m,weather_code` +
-    `&hourly=temperature_2m,weather_code` +
+    `&hourly=temperature_2m,weather_code,precipitation_probability,precipitation,snowfall` +
     `&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset` +
     `&forecast_days=7&timezone=auto` +
     `&temperature_unit=${imperial ? 'fahrenheit' : 'celsius'}`;
@@ -244,9 +245,24 @@ async function fetchWeather(client: BridgethingClient, lat: number, lon: number,
   const nowIso = (cur.time as string).slice(0, 13);
   let start = (H.time as string[]).findIndex(t => t.slice(0, 13) >= nowIso);
   if (start < 0) start = 0;
+  const toHour = (i: number): Hour => ({
+    t: H.time[i].slice(11, 16),
+    temp: Math.round(H.temperature_2m[i]),
+    icon: wmo(H.weather_code[i])[0],
+    precipProb: Math.round(H.precipitation_probability?.[i] ?? 0),
+    precip: H.precipitation?.[i] ?? 0,
+    snow: H.snowfall?.[i] ?? 0,
+  });
   const hourly: Hour[] = [];
   for (let i = start; i < Math.min(start + 7, H.time.length); i++) {
-    hourly.push({ t: H.time[i].slice(11, 16), temp: Math.round(H.temperature_2m[i]), icon: wmo(H.weather_code[i])[0] });
+    hourly.push(toHour(i));
+  }
+  // the same hourly series covers the whole forecast_days window, so group it by date once
+  // instead of a second request per day tapped in the forecast list.
+  const dailyHourly: Record<string, Hour[]> = {};
+  for (let i = 0; i < H.time.length; i++) {
+    const date = H.time[i].slice(0, 10);
+    (dailyHourly[date] ??= []).push(toHour(i));
   }
   const DD = d.daily;
   const daily: Day[] = (DD.time as string[]).map((date, i) => {
@@ -263,6 +279,7 @@ async function fetchWeather(client: BridgethingClient, lat: number, lon: number,
     lo: Math.round(DD.temperature_2m_min[0]),
     hourly,
     daily,
+    dailyHourly,
     sunrise: DD.sunrise?.[0]?.slice(11, 16) ?? null,
     sunset: DD.sunset?.[0]?.slice(11, 16) ?? null,
   };
@@ -273,6 +290,76 @@ function hr12(t: string): string {
   const ap = h < 12 ? 'a' : 'p';
   const hh = h % 12 || 12;
   return `${hh}${ap}`;
+}
+
+function DayHourAxis({ hours }: { hours: Hour[] }) {
+  return (
+    <div className="mt-1 flex justify-between text-[13px] font-semibold text-sec">
+      {hours.filter((_, i) => i % 3 === 0).map(h => (
+        <span key={h.t}>{hr12(h.t)}</span>
+      ))}
+    </div>
+  );
+}
+
+function TempGraph({ hours, unit }: { hours: Hour[]; unit: Unit }) {
+  const W = 720;
+  const H = 130;
+  const PAD = 16;
+  if (hours.length < 2) return null;
+  const temps = hours.map(h => h.temp);
+  const min = Math.min(...temps);
+  const span = Math.max(1, Math.max(...temps) - min);
+  const x = (i: number) => (i / (hours.length - 1)) * W;
+  const y = (t: number) => PAD + (1 - (t - min) / span) * (H - PAD * 2);
+  const line = hours.map((h, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(h.temp).toFixed(1)}`).join(' ');
+  const area = `${line} L ${x(hours.length - 1).toFixed(1)} ${H} L 0 ${H} Z`;
+  return (
+    <div>
+      <div className="mb-2 text-[13px] font-semibold uppercase tracking-[0.05em] text-sec">Temperature ({unit})</div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+        <path d={area} fill="var(--color-accent)" opacity="0.14" />
+        <path d={line} fill="none" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        {hours.map(
+          (h, i) => i % 3 === 0 && <circle key={h.t} cx={x(i)} cy={y(h.temp)} r="3.4" fill="var(--color-accent)" />,
+        )}
+      </svg>
+      <DayHourAxis hours={hours} />
+    </div>
+  );
+}
+
+function PrecipGraph({ hours }: { hours: Hour[] }) {
+  const W = 720;
+  const H = 90;
+  if (hours.length === 0) return null;
+  const barW = W / hours.length;
+  const anyPrecip = hours.some(h => h.precipProb > 0);
+  return (
+    <div>
+      <div className="mb-2 text-[13px] font-semibold uppercase tracking-[0.05em] text-sec">Precipitation</div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+        {hours.map((h, i) => {
+          const bh = Math.max(2, (h.precipProb / 100) * (H - 4));
+          const color = h.snow > 0 ? FLAKE : DROP;
+          return (
+            <rect
+              key={h.t}
+              x={i * barW + barW * 0.15}
+              y={H - bh}
+              width={barW * 0.7}
+              height={bh}
+              rx="2"
+              fill={color}
+              opacity={h.precipProb > 0 ? 0.9 : 0.15}
+            />
+          );
+        })}
+      </svg>
+      <DayHourAxis hours={hours} />
+      {!anyPrecip && <div className="mt-1 text-[13px] text-sec">no precipitation expected</div>}
+    </div>
+  );
 }
 
 function hm(s: string | null): number | null {
@@ -335,7 +422,7 @@ const PRESET_PLACES: { name: string; lat: number; lon: number }[] = [
   { name: 'Toronto, Canada', lat: 43.6532, lon: -79.3832 },
 ];
 
-type Mode = 'home' | 'settings' | 'forecast' | 'standby' | 'notifications';
+type Mode = 'home' | 'settings' | 'forecast' | 'standby' | 'notifications' | 'day';
 
 export default function App() {
   const client = useMemo(() => new BridgethingClient({ url: daemonUrl() }), []);
@@ -357,6 +444,8 @@ export default function App() {
   const [peers, setPeers] = useState<Peer[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [refreshFlash, setRefreshFlash] = useState(false);
+  const [openDay, setOpenDay] = useState<string | null>(null);
+  const [dayScrollY, setDayScrollY] = useState(0);
 
   useEffect(() => {
     const off = client.peer.onSnapshot(map => setPeers(Object.values(map)));
@@ -541,7 +630,8 @@ export default function App() {
       if (e.key === '4') setMode(m => (m === 'standby' ? 'home' : 'standby'));
       if (e.key === 'm') setMode(m => (m === 'settings' ? 'home' : 'settings'));
       if (e.key === 'Escape') {
-        if (mode === 'home') setThemeOverride(null);
+        if (mode === 'day') setMode('forecast');
+        else if (mode === 'home') setThemeOverride(null);
         else setMode('home');
       }
     };
@@ -575,7 +665,8 @@ export default function App() {
     const TOP_BAND = 70;
     const THRESHOLD = 50;
     const onDown = (e: PointerEvent) => {
-      start = e.clientY <= TOP_BAND ? { x: e.clientX, y: e.clientY } : null;
+      // the day-detail view has its own drag-to-scroll starting anywhere in it, top edge included.
+      start = mode !== 'day' && e.clientY <= TOP_BAND ? { x: e.clientX, y: e.clientY } : null;
     };
     const onUp = (e: PointerEvent) => {
       if (!start) return;
@@ -596,7 +687,30 @@ export default function App() {
       window.removeEventListener('pointerdown', onDown);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [refresh]);
+  }, [refresh, mode]);
+
+  // day-detail's own drag-to-scroll (the view is often taller than the 480px screen).
+  const dayDrag = useRef<{ startY: number; startScroll: number } | null>(null);
+  const dayViewportRef = useRef<HTMLDivElement>(null);
+  const dayContentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => setDayScrollY(0), [openDay]);
+  const clampDayScroll = (y: number) => {
+    const viewport = dayViewportRef.current;
+    const content = dayContentRef.current;
+    if (!viewport || !content) return y;
+    const max = Math.max(0, content.scrollHeight - viewport.clientHeight);
+    return Math.min(0, Math.max(-max, y));
+  };
+  const onDayPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    dayDrag.current = { startY: e.clientY, startScroll: dayScrollY };
+  };
+  const onDayPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dayDrag.current) return;
+    setDayScrollY(clampDayScroll(dayDrag.current.startScroll + (e.clientY - dayDrag.current.startY)));
+  };
+  const endDayDrag = () => {
+    dayDrag.current = null;
+  };
 
   // standby dims the physical backlight, remembering whatever it was so leaving standby restores
   // it exactly (auto mode, or a manual level) rather than assuming a specific default.
@@ -745,7 +859,13 @@ export default function App() {
           <div className="text-[27px] font-semibold">7-Day Forecast</div>
           <div className="flex flex-1 items-stretch justify-between gap-2">
             {(weather?.daily ?? []).map(d => (
-              <div key={d.date} className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl bg-card py-4">
+              <div
+                key={d.date}
+                onClick={() => {
+                  setOpenDay(d.date);
+                  setMode('day');
+                }}
+                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl bg-card py-4 active:opacity-70">
                 <div className="text-[16px] font-semibold uppercase tracking-[0.05em] text-sec">{d.dow}</div>
                 <WeatherIcon icon={d.icon} className="h-10 w-10" />
                 <div className="text-[22px] font-semibold">{d.hi}°</div>
@@ -754,7 +874,50 @@ export default function App() {
             ))}
             {!weather && <div className="flex flex-1 items-center justify-center text-sec">loading forecast...</div>}
           </div>
-          <div className="text-[14px] text-sec">press button 3 or escape to close</div>
+          <div className="text-[14px] text-sec">tap a day for the hourly breakdown · button 3 or escape to close</div>
+        </div>
+      )}
+
+      {mode === 'day' && (
+        <div className="absolute inset-0 z-20 flex flex-col bg-bg p-8">
+          {(() => {
+            const day = weather?.daily.find(d => d.date === openDay) ?? null;
+            const hours = openDay ? (weather?.dailyHourly[openDay] ?? []) : [];
+            return (
+              <>
+                <div className="mb-2 flex items-baseline justify-between pr-2">
+                  <button type="button" onClick={() => setMode('forecast')} className="text-[16px] font-semibold text-accent">
+                    ‹ 7-Day Forecast
+                  </button>
+                  {day && (
+                    <div className="text-[17px] font-semibold text-sec">
+                      {day.dow} &nbsp; H <span className="text-fg">{day.hi}°</span>&nbsp;&nbsp;L <span className="text-fg">{day.lo}°</span>
+                    </div>
+                  )}
+                </div>
+                <div
+                  ref={dayViewportRef}
+                  className="relative flex-1 touch-none overflow-hidden"
+                  onPointerDown={onDayPointerDown}
+                  onPointerMove={onDayPointerMove}
+                  onPointerUp={endDayDrag}
+                  onPointerLeave={endDayDrag}
+                  onPointerCancel={endDayDrag}>
+                  <div ref={dayContentRef} className="flex flex-col gap-6" style={{ transform: `translateY(${dayScrollY}px)` }}>
+                    {hours.length > 1 ? (
+                      <>
+                        <TempGraph hours={hours} unit={unit} />
+                        <PrecipGraph hours={hours} />
+                      </>
+                    ) : (
+                      <div className="text-[16px] text-sec">loading hourly data...</div>
+                    )}
+                  </div>
+                </div>
+                <div className="pt-2 text-[13px] text-sec">drag to scroll · escape to go back</div>
+              </>
+            );
+          })()}
         </div>
       )}
 

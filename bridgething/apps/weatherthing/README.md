@@ -15,13 +15,13 @@ multi‑tone weather icons, and an on‑device settings screen (physical button 
 | **Notification center** | **Standby** | **Night (auto dark)** |
 | ![WeatherThing notification center](screenshots/04.png) | ![WeatherThing standby mode](screenshots/05.png) | ![WeatherThing at night](screenshots/06.png) |
 
-Controls: button **1** toggles dark/light, **2** toggles °C/°F, **3** opens a 7‑day forecast,
-**4** enters a dimmed standby (clock + temperature only, real backlight dimming), and **mode**
-opens on‑device settings (knob‑scrollable location list, plus a live phone/Bluetooth status row).
-Swipe down from the top‑left to refresh weather; swipe down from the top‑right to open a live
-phone notification center. Every button press gives the screen a brief press‑in pulse. Theme
-auto‑switches on real sunrise/sunset when left on auto. A location typed into the companion app's
-settings always takes over from an on‑device pick.
+Controls: button **1** toggles dark/light, **2** toggles °C/°F, **3** opens a 7‑day forecast (tap
+a day for an hourly temperature graph and precipitation chart, drag to scroll), **4** enters a
+dimmed standby (clock + temperature only, real backlight dimming), and **mode** opens on‑device
+settings (knob‑scrollable location list, plus a live phone/Bluetooth status row). Swipe down from
+the top‑left to refresh weather; swipe down from the top‑right to open a live phone notification
+center. Theme auto‑switches on real sunrise/sunset when left on auto. A location typed into the
+companion app's settings always takes over from an on‑device pick.
 
 ## Dev workflow
 

@@ -1,5 +1,9 @@
 # WeatherThing
 
+## 0.5.0
+
+tap a day in the 7-day forecast for an hourly breakdown: a temperature line graph and an hourly precipitation chart, both drag-to-scroll
+
 ## 0.4.2
 
 remove the button-press screen-pulse animation (felt like a glitch when toggling theme)
