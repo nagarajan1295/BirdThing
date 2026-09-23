@@ -1,5 +1,9 @@
 # WeatherThing
 
+## 0.4.2
+
+remove the button-press screen-pulse animation (felt like a glitch when toggling theme)
+
 ## 0.4.1
 
 settings: autocomplete-driven location picker, hide raw lat/lon inputs, single Save button (drop the dead Save-to-device action)

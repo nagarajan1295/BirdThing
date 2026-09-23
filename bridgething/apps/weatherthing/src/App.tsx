@@ -355,7 +355,6 @@ export default function App() {
   const [presetIndex, setPresetIndex] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>('home');
   const [peers, setPeers] = useState<Peer[]>([]);
-  const [pressed, setPressed] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [refreshFlash, setRefreshFlash] = useState(false);
 
@@ -529,18 +528,9 @@ export default function App() {
   // instead of also performing its normal action, matching how a dimmed screen usually behaves.
   // escape backs out of whatever's open; from home it clears the theme override back to auto.
   // the wheel cycles the on-device location preset while settings is open.
-  // a brief "pressed" pulse on the physical preset/mode buttons, like a volume HUD acknowledging
-  // the press -- purely cosmetic, applied as a transform in the JSX below.
-  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flashPress = () => {
-    setPressed(true);
-    if (pressTimer.current) clearTimeout(pressTimer.current);
-    pressTimer.current = setTimeout(() => setPressed(false), 130);
-  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (['1', '2', '3', '4', 'm'].includes(e.key)) flashPress();
       if (mode === 'standby') {
         setMode('home');
         return;
@@ -666,9 +656,7 @@ export default function App() {
   }
 
   return (
-    <div
-      className="relative flex h-full w-full flex-col bg-bg text-fg transition-transform duration-100 ease-out"
-      style={pressed ? { transform: 'scale(0.985)', boxShadow: 'inset 0 0 40px rgba(0,0,0,0.5)' } : undefined}>
+    <div className="relative flex h-full w-full flex-col bg-bg text-fg">
       <div className="absolute right-6 top-3 z-10 flex items-center gap-2">
         <BluetoothGlyph status={phoneStatus} />
         <span className={'text-[13px] font-semibold ' + (error ? 'text-[#ff453a]' : 'text-sec')}>
