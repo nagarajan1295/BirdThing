@@ -1,7 +1,7 @@
 {
   "$schema": "https://apps.bridgething.com/schemas/catalog/v1.json",
   "schema": "catalog.v1",
-  "updated_at": "2026-09-23T04:39:33.641Z",
+  "updated_at": "2026-09-23T04:53:42.810Z",
   "repo": {
     "name": "BirdThing",
     "description": "WeatherThing: a clock and weather station for the Spotify Car Thing.",
@@ -12,7 +12,7 @@
     {
       "id": "01a09688-246b-705e-9856-a847d1c0573c",
       "name": "WeatherThing",
-      "description": "A big digital and analog clock, current conditions, a 7-day forecast, standby mode, and a phone notification center.",
+      "description": "A big digital and analog clock, current conditions, an hourly-breakdown 7-day forecast, standby mode, and a phone notification center.",
       "author": "Naga",
       "icon": "https://nagarajan1295.github.io/BirdThing/icons/01a09688-246b-705e-9856-a847d1c0573c.png",
       "screenshots": [
@@ -27,21 +27,21 @@
       "source": "https://github.com/nagarajan1295/BirdThing/tree/master/bridgething/apps/weatherthing",
       "versions": [
         {
-          "version": "0.4.2",
-          "released_at": "2026-09-23T04:39:33.636Z",
+          "version": "0.5.0",
+          "released_at": "2026-09-23T04:53:42.806Z",
           "download": {
-            "url": "https://nagarajan1295.github.io/BirdThing/r/01a09688-246b-705e-9856-a847d1c0573c/0.4.2.zip",
-            "size": 809963,
-            "sha256": "d1d9ee4e8842d3420699d3f0d5fe3753ae633e1972ec005b60c4ed98429db006"
+            "url": "https://nagarajan1295.github.io/BirdThing/r/01a09688-246b-705e-9856-a847d1c0573c/0.5.0.zip",
+            "size": 814026,
+            "sha256": "769828917698f1d13e5d3afc1bba3bcc11cf46b5d38ca380893309f9ae54b8ce"
           },
           "settings": {
-            "url": "https://nagarajan1295.github.io/BirdThing/s/01a09688-246b-705e-9856-a847d1c0573c/0.4.2.html",
+            "url": "https://nagarajan1295.github.io/BirdThing/s/01a09688-246b-705e-9856-a847d1c0573c/0.5.0.html",
             "size": 28528,
             "sha256": "8002db8dd8bd7d061786cb6443e33a463e87b416f1f722bcd2956f8c4f489aa8"
           },
           "permissions": [],
           "min_libbridgething_version": "0.12.1",
-          "changelog": "remove the button-press screen-pulse animation (felt like a glitch when toggling theme)"
+          "changelog": "tap a day in the 7-day forecast for an hourly breakdown: a temperature line graph and an hourly precipitation chart, both drag-to-scroll"
         }
       ]
     }
