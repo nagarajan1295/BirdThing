@@ -1,5 +1,9 @@
 # WeatherThing
 
+## 0.4.1
+
+settings: autocomplete-driven location picker, hide raw lat/lon inputs, single Save button (drop the dead Save-to-device action)
+
 ## 0.4.0
 
 remove the on-screen button legend, show unit letter even with no weather data, add a real phone/Bluetooth status glyph and settings row (distinguishing Bluetooth-paired-but-app-closed from genuinely connected), a button-press screen animation, and swipe gestures: top-left pulls to refresh, top-right opens a live notification center

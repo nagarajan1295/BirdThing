@@ -50,6 +50,36 @@ h1 {
   color: inherit;
 }
 
+.suggestions {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, canvas 92%, currentColor 8%);
+}
+
+.suggestions li + li {
+  margin-top: 2px;
+}
+
+.suggestions button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 0.95rem;
+  font-weight: 400;
+  background: transparent;
+  color: inherit;
+  border-radius: 6px;
+}
+
+.suggestions button:hover,
+.suggestions button:focus-visible {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
 .row {
   display: flex;
   gap: 10px;

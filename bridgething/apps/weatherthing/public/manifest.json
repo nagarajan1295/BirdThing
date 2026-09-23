@@ -1,7 +1,7 @@
 {
   "id": "01a09688-246b-705e-9856-a847d1c0573c",
   "name": "WeatherThing",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "A big digital and analog clock, current conditions, a 7-day forecast, standby mode, and a phone notification center.",
   "settings": "settings.html",
   "icon": "icon.png",
