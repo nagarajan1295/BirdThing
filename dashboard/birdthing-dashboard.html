@@ -781,6 +781,18 @@ function specLoop(){
   specRAF=requestAnimationFrame(specLoop);
 }
 let wxFocusT=0;
+
+// Weather view: LONG-press button 1 returns to the bird dashboard. Keys come either straight
+// from this page or forwarded by the embedded weather page (postMessage); short presses are ignored there.
+let wxLP=0;
+function wxKey(t,k){
+  if(!document.getElementById('live').classList.contains('show'))return false;
+  if(k==='1'){ if(t==='keydown'){if(!wxLP)wxLP=setTimeout(()=>{wxLP=0;closeAllOverlays();},700);}
+               else{clearTimeout(wxLP);wxLP=0;} return true; }
+  return false;
+}
+window.addEventListener('message',e=>{const m=e.data;if(m&&m.k&&m.t&&!wxKey(m.t,m.k)&&m.t==='keydown'&&!m.r)btnNav(m.k);});
+['keydown','keyup'].forEach(t=>document.addEventListener(t,ev=>{if(wxKey(t,ev.key)){ev.preventDefault();ev.stopImmediatePropagation();}},true));
 function openLive(){openView('live');document.body.classList.add('wxlive');const f=document.getElementById('wxFrame');
   if(!f.src)f.src='http://'+location.hostname+':8095/#c69';
   clearInterval(wxFocusT);wxFocusT=setInterval(()=>{if(document.activeElement===f)window.focus();},500);}
