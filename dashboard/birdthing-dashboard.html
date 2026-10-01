@@ -641,7 +641,7 @@ document.addEventListener('keydown',(ev)=>{
   else if(k==='Escape'||k==='Backspace')goLive();
 });
 // ---- Views (gallery / live / settings) ----
-function closeAllOverlays(){closeFacts();document.body.classList.remove('wxlive');['gallery','live','settings','analytics','wifi','spotify','clapview','clockview','yearview'].forEach(id=>document.getElementById(id).classList.remove('show'));}
+function closeAllOverlays(){closeFacts();document.body.classList.remove('wxlive');if(typeof wxFocusT!=='undefined'){clearInterval(wxFocusT);const wf=document.getElementById('wxFrame');if(wf){wf.blur();window.focus();}}['gallery','live','settings','analytics','wifi','spotify','clapview','clockview','yearview'].forEach(id=>document.getElementById(id).classList.remove('show'));}
 function openView(id){closeAllOverlays();document.getElementById(id).classList.add('show');}
 function closeView(id){document.getElementById(id).classList.remove('show');if(id==='live')document.body.classList.remove('wxlive');if(id==='live')clearInterval(wxFocusT);}
 function curOverlay(){if(factsOpen)return'facts';return ['gallery','live','settings','analytics','wifi','spotify','clapview','clockview','yearview'].find(id=>document.getElementById(id).classList.contains('show'));}
@@ -791,11 +791,11 @@ function wxKey(t,k){
                else{clearTimeout(wxLP);wxLP=0;} return true; }
   return false;
 }
-window.addEventListener('message',e=>{const m=e.data;if(m&&m.k&&m.t&&!wxKey(m.t,m.k)&&m.t==='keydown'&&!m.r)btnNav(m.k);});
+window.addEventListener('message',e=>{const m=e.data;if(m&&m.k&&m.t){wxKey(m.t,m.k);}});
 ['keydown','keyup'].forEach(t=>document.addEventListener(t,ev=>{if(wxKey(t,ev.key)){ev.preventDefault();ev.stopImmediatePropagation();}},true));
 function openLive(){openView('live');document.body.classList.add('wxlive');const f=document.getElementById('wxFrame');
-  if(!f.src)f.src='http://'+location.hostname+':8095/#c69';
-  clearInterval(wxFocusT);wxFocusT=setInterval(()=>{if(document.activeElement===f)window.focus();},500);}
+  if(!f.src){f.src='http://'+location.hostname+':8095/#c69';f.onload=()=>f.focus();}
+  clearInterval(wxFocusT);wxFocusT=setInterval(()=>{if(document.activeElement!==f)f.focus();},500);}
 function renderLive(){
   if(!rows.length){document.getElementById('liveName').textContent='Listening…';
     document.getElementById('liveSci').textContent='';document.getElementById('liveConf').textContent='';
