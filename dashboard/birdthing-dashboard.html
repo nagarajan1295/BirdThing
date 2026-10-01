@@ -123,6 +123,7 @@
   .key:active{background:var(--card2);}
   .key.wide{flex:2.4;}
   /* generic full-screen view */
+  body.wxlive .top{display:none!important}
   .view{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;z-index:15;
     opacity:0;visibility:hidden;transform:scale(1.015);
     transition:opacity .26s ease,transform .26s ease,visibility .26s;}
@@ -286,16 +287,9 @@
   <div class="vhead"><div class="vtitle">Birds</div><div class="vclose" onclick="closeView('gallery')">Back</div></div>
   <div class="vbody" id="galBody"></div>
 </div>
-<div id="live" class="view">
-  <div class="vhead"><div class="vtitle">Live</div><div class="vclose" onclick="closeView('live')">Back</div></div>
-  <div class="lwrap">
-    <div class="rec"><div class="recdot"></div><span>Recording &amp; identifying…</span></div>
-    <canvas id="spec" width="720" height="150" style="width:720px;height:150px;border-radius:14px;background:var(--card)"></canvas>
-    <img class="lphoto" id="liveImg" alt="">
-    <div class="lname" id="liveName">—</div>
-    <div class="lsci" id="liveSci"></div>
-    <div class="lconf" id="liveConf"></div>
-  </div>
+<div id="live" class="view" style="background:#000">
+  <iframe id="wxFrame" tabindex="-1" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>
+  <div class="lwrap" style="display:none"><canvas id="spec" width="1" height="1"></canvas><img id="liveImg" alt=""><div id="liveName"></div><div id="liveSci"></div><div id="liveConf"></div></div>
 </div>
 <div id="spotify" class="view">
   <div class="vhead"><div class="vtitle">Spotify</div><div class="vclose" onclick="closeView('spotify')">Back</div></div>
@@ -647,9 +641,9 @@ document.addEventListener('keydown',(ev)=>{
   else if(k==='Escape'||k==='Backspace')goLive();
 });
 // ---- Views (gallery / live / settings) ----
-function closeAllOverlays(){closeFacts();['gallery','live','settings','analytics','wifi','spotify','clapview','clockview','yearview'].forEach(id=>document.getElementById(id).classList.remove('show'));}
+function closeAllOverlays(){closeFacts();document.body.classList.remove('wxlive');['gallery','live','settings','analytics','wifi','spotify','clapview','clockview','yearview'].forEach(id=>document.getElementById(id).classList.remove('show'));}
 function openView(id){closeAllOverlays();document.getElementById(id).classList.add('show');}
-function closeView(id){document.getElementById(id).classList.remove('show');}
+function closeView(id){document.getElementById(id).classList.remove('show');if(id==='live')document.body.classList.remove('wxlive');if(id==='live')clearInterval(wxFocusT);}
 function curOverlay(){if(factsOpen)return'facts';return ['gallery','live','settings','analytics','wifi','spotify','clapview','clockview','yearview'].find(id=>document.getElementById(id).classList.contains('show'));}
 async function openGallery(){openView('gallery');
   const b=document.getElementById('galBody');b.innerHTML='Loading…';
@@ -786,7 +780,10 @@ function specLoop(){
   }
   specRAF=requestAnimationFrame(specLoop);
 }
-function openLive(){openView('live');renderLive();specEnergy=0.9;if(!specRAF)specLoop();}
+let wxFocusT=0;
+function openLive(){openView('live');document.body.classList.add('wxlive');const f=document.getElementById('wxFrame');
+  if(!f.src)f.src='http://'+location.hostname+':8095/#c69';
+  clearInterval(wxFocusT);wxFocusT=setInterval(()=>{if(document.activeElement===f)window.focus();},500);}
 function renderLive(){
   if(!rows.length){document.getElementById('liveName').textContent='Listening…';
     document.getElementById('liveSci').textContent='';document.getElementById('liveConf').textContent='';
