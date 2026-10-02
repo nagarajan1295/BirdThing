@@ -774,6 +774,58 @@ def clap_test(q=None):
     return {"ok": ok, "toggled": ents}
 
 
+# ---- Room presence sensitivity (Settings sliders -> Home Assistant helpers) -----------------
+# The two sliders ARE Home Assistant helpers (input_number.bedroom_sensitivity /
+# living_room_sensitivity, 1-10). HA automations turn the level into the ESP32 motion threshold
+# / living-room zone threshold, so this is only a thin read/write proxy: the HA app slider and
+# the BirdThing page are always the same value. Only these two fixed entities can be written,
+# and only integer levels 1-10 -- nothing from the query string selects an entity.
+_PRESENS = {"bedroom": "input_number.bedroom_sensitivity",
+            "living_room": "input_number.living_room_sensitivity"}
+
+def _ha_json(c, path, payload=None, timeout=6):
+    hdr = {"Authorization": "Bearer " + c["ha_token"]}
+    url = c["ha_url"].rstrip("/") + path
+    if payload is None:
+        req = urllib.request.Request(url, headers=hdr)
+    else:
+        hdr["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST", headers=hdr)
+    return json.load(urllib.request.urlopen(req, timeout=timeout))
+
+def presens_status():
+    c = _clap_load()
+    if not (c.get("ha_url") and c.get("ha_token")):
+        return {"ok": False, "err": "no Home Assistant token"}
+    try:
+        st = lambda e: _ha_json(c, "/api/states/" + e)
+        return {"ok": True,
+                "bedroom": int(float(st(_PRESENS["bedroom"])["state"])),
+                "living_room": int(float(st(_PRESENS["living_room"])["state"])),
+                "bedroom_threshold": st("number.espectre_bedroom_threshold")["state"],
+                "living_room_threshold": st("input_number.living_room_zone_min")["state"]}
+    except Exception as e:
+        return {"ok": False, "err": str(e)[:120]}
+
+def presens_set(q):
+    c = _clap_load()
+    if not (c.get("ha_url") and c.get("ha_token")):
+        return {"ok": False, "err": "no Home Assistant token"}
+    for key, ent in _PRESENS.items():
+        if key not in q:
+            continue
+        try:
+            v = min(10, max(1, int(round(float(q[key][0])))))
+        except Exception:
+            continue
+        try:
+            _ha_json(c, "/api/services/input_number/set_value", {"entity_id": ent, "value": v})
+        except Exception as e:
+            return {"ok": False, "err": str(e)[:120]}
+    time.sleep(1.2)   # give the HA automations a moment to push the threshold so the read-back shows it
+    return presens_status()
+
+
 # --- ANCS iPhone notifications ---
 # Same-origin proxy for the ANCS gateway (BirdThing Pi :8099) so the Car
 # Thing's browser can read iPhone notifications; it has no route to that host
@@ -881,6 +933,11 @@ class H(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/sf"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, "application/json", json.dumps(set_sf(q.get("t", ["0.03"])[0])).encode())
+        elif self.path.startswith("/api/presens/set"):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._send(200, "application/json", json.dumps(presens_set(q)).encode())
+        elif self.path.startswith("/api/presens"):
+            self._send(200, "application/json", json.dumps(presens_status()).encode())
         elif self.path.startswith("/api/clap/set"):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self._send(200, "application/json", json.dumps(clap_set(q)).encode())

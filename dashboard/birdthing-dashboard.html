@@ -346,6 +346,13 @@
       <div class="mtl">ID strictness <span class="mtv" id="mtConfV"></span></div>
       <div class="slider mtbar" id="mtConf"><div class="bfill" id="mtConfF"></div></div>
       <div class="about" id="mtStatus" style="padding:4px 0 0"></div></div>
+    <div class="srow"><span class="sk">Room presence sensitivity</span>
+      <span class="about" style="padding:0 0 2px">How easily the ESP32 presence sensor notices you (it turns the lights on). These are the same sliders as in the Home Assistant app — change either one and both stay in sync. Higher = reacts to smaller movements, but may also false‑trigger.</span>
+      <div class="mtl">Bedroom <span class="mtv" id="psBedV"></span></div>
+      <div class="slider mtbar" id="psBed"><div class="bfill" id="psBedF"></div></div>
+      <div class="mtl">Living room <span class="mtv" id="psLivV"></span></div>
+      <div class="slider mtbar" id="psLiv"><div class="bfill" id="psLivF"></div></div>
+      <div class="about" id="psStatus" style="padding:4px 0 0"></div></div>
     <div class="srow" style="border:none;flex-direction:column;align-items:flex-start;gap:8px">
       <span class="sk">Today's activity</span>
       <div class="chart" id="chart" style="width:100%"></div>
@@ -813,7 +820,7 @@ function setHi(){const o=setOpts();o.forEach((b,i)=>b.classList.toggle('khi',i==
 function setMove(d){const o=setOpts();if(!o.length)return;
   sliderActive=false;document.querySelectorAll('#settings .slider.active').forEach(s=>s.classList.remove('active'));
   setSel=(setSel+d+o.length)%o.length;setHi();}
-async function openSettings(){openView('settings');markSettings();applyBright();markBrightAuto();renderStats();markGeo();mtLoad();
+async function openSettings(){openView('settings');markSettings();applyBright();markBrightAuto();renderStats();markGeo();mtLoad();psLoad();
   document.getElementById('about').innerHTML=
     `BirdThing · version <b>${VERSION}</b><br>Listens for birds with a Spotify Car Thing &amp; BirdNET.<br>Created by <b>Naga</b>.`;
   setSel=0;sliderActive=false;setTimeout(setHi,60);
@@ -1046,7 +1053,9 @@ const mtSetters={gain:mtBar('mtGain','gain',v=>Math.round(v)+'× max boost'),
   conf:mtBar('mtConf','conf',v=>Math.round(v*100)+'% sure'+(v<0.65?' (catch-all)':v<0.85?' (balanced)':' (strict)'))};
 // knob step per mic slider (id -> [mtVals key, step per detent]); adjusts + applies (debounced)
 const MTSTEP={mtGain:['gain',10],mtGate:['gate',10],mtConf:['conf',0.02]};
-function mtKnob(id,dir){const s=MTSTEP[id];if(!s)return;mtSetters[s[0]](mtVals[s[0]]+dir*s[1],true);}
+function mtKnob(id,dir){
+  if(id==='psBed'||id==='psLiv'){if(psLoaded)psSetters[id==='psBed'?'bed':'liv'](psVals[id==='psBed'?'bed':'liv']+dir,true);return;}
+  const s=MTSTEP[id];if(!s)return;mtSetters[s[0]](mtVals[s[0]]+dir*s[1],true);}
 function mtHp(v){mtVals.hp=v;markMt();mtQueue();}
 function markMt(){document.querySelectorAll('[data-hp]').forEach(b=>b.classList.toggle('on',+b.dataset.hp===mtVals.hp));
   const e=document.getElementById('mtHpV');if(e)e.textContent=mtVals.hp?'— On (cuts below 250 Hz)':'— Off (raw audio)';}
@@ -1061,6 +1070,43 @@ async function mtLoad(){try{const c=await (await fetch('/api/mictune')).json();
   mtVals={gain:c.gain,gate:c.gate,hp:c.hp,conf:c.conf};
   mtSetters.gain(c.gain,false);mtSetters.gate(c.gate,false);mtSetters.conf(c.conf,false);markMt();
   document.getElementById('mtStatus').textContent='';}catch(e){}}
+
+// ---- Room presence sensitivity (Settings sliders -> /api/presens* -> Home Assistant helpers) ----
+// Levels 1-10 (1 = least sensitive, 10 = most). HA owns the mapping to the real ESP32 threshold;
+// this page only reads/writes the level. Only a slider the user actually moved is ever written
+// back (psDirty), and nothing is written until the current values loaded successfully (psLoaded),
+// so a failed load can never overwrite the real settings with defaults.
+let psVals={bed:6,liv:6},psThr={bed:'',liv:''},psDirty={},psLoaded=false,psT=null,psSetters={};
+const psTxt=v=>v+' / 10'+(v<=2?' (least sensitive)':v>=9?' (most sensitive)':'');
+function psBar(id,key){
+  const bar=document.getElementById(id),fill=document.getElementById(id+'F'),lbl=document.getElementById(id+'V');
+  function set(v,apply){v=Math.max(1,Math.min(10,Math.round(v)));psVals[key]=v;
+    fill.style.width=(100*(v-1)/9)+'%';
+    lbl.textContent='— '+psTxt(v)+(psThr[key]?' · threshold '+psThr[key]:'');
+    if(apply){psDirty[key]=1;psQueue();}}
+  function fromE(e){if(!psLoaded)return;const r=bar.getBoundingClientRect();set(1+((e.clientX-r.left)/r.width)*9,false);}
+  let d=false;
+  bar.addEventListener('pointerdown',e=>{if(!psLoaded)return;d=true;bar.classList.add('active');try{bar.setPointerCapture(e.pointerId);}catch(_){ }fromE(e);});
+  bar.addEventListener('pointermove',e=>{if(d)fromE(e);});
+  ['pointerup','pointercancel'].forEach(ev=>bar.addEventListener(ev,()=>{if(d){d=false;bar.classList.remove('active');psDirty[key]=1;psQueue();}}));
+  return set;}
+psSetters={bed:psBar('psBed','bed'),liv:psBar('psLiv','liv')};
+function psShow(c){psVals.bed=c.bedroom;psVals.liv=c.living_room;psThr.bed=c.bedroom_threshold;psThr.liv=c.living_room_threshold;
+  psSetters.bed(c.bedroom,false);psSetters.liv(c.living_room,false);}
+function psQueue(){clearTimeout(psT);const st=document.getElementById('psStatus');st.textContent='Applying…';
+  psT=setTimeout(async()=>{try{
+    const p=new URLSearchParams();
+    if(psDirty.bed)p.set('bedroom',psVals.bed);if(psDirty.liv)p.set('living_room',psVals.liv);
+    psDirty={};
+    const r=await (await fetch('/api/presens/set?'+p.toString())).json();
+    if(!r.ok){st.textContent='Could not apply — '+(r.err||'Home Assistant unreachable')+'. Try again.';return;}
+    psShow(r);st.textContent='Applied ✓  ·  sensor threshold now '+r.bedroom_threshold+' (bedroom), '+r.living_room_threshold+' (living room)';
+  }catch(e){st.textContent='Could not apply — try again.';}},600);}
+async function psLoad(){const st=document.getElementById('psStatus');
+  try{const c=await (await fetch('/api/presens')).json();
+    if(!c.ok)throw new Error(c.err||'unreachable');
+    psLoaded=true;psShow(c);st.textContent='';
+  }catch(e){psLoaded=false;st.textContent='Can’t reach Home Assistant right now — sliders are locked so nothing gets overwritten.';}}
 
 // ---- Clap control (Settings -> Clap page -> /api/clap*). Toggles HA switches on a double
 // clap. Fully separate from BirdNET; sensitivity/boost tune the receiver's clapdetect. ----
