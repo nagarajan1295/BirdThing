@@ -12,6 +12,10 @@ import dbus, json, os, subprocess, time, urllib.request
 CONF = "/opt/party/speakers.json"
 RPC = "http://192.168.1.250:1780/jsonrpc"  # snapserver + AirPlay live on the living-room Pi
 IDLE_S = 120
+# roomloc's continuous BLE discovery hogs the Pi's shared WiFi/BT radio; with
+# two A2DP streams on top, WiFi starves (snapclient TCP drops). Pause it while
+# a party plays - follow-me audio can't use the Echoes then anyway.
+PAUSE_UNITS = ["roomloc-node.service"]
 RETRY_S = 20
 LOG = "/var/log/party-agent.log"
 
@@ -27,7 +31,7 @@ def log(msg):
 def rpc(method, params=None):
     body = json.dumps({"id": 1, "jsonrpc": "2.0", "method": method, "params": params or {}}).encode()
     req = urllib.request.Request(RPC, body, {"Content-Type": "application/json"})
-    return json.load(urllib.request.urlopen(req, timeout=3))["result"]
+    return json.load(urllib.request.urlopen(req, timeout=8))["result"]
 
 
 def playing():
@@ -79,12 +83,19 @@ def client_active(mac):
 
 
 def main():
-    last_play, ours, next_try = 0.0, set(), {}
+    last_play, ours, next_try, paused = 0.0, set(), {}, False
     log("agent start")
+    for u in PAUSE_UNITS:          # never leave them stopped across an agent restart
+        systemctl("start", u)
     while True:
         spk = speakers()
         if playing():
             last_play = time.time()
+            if not paused:
+                for u in PAUSE_UNITS:
+                    systemctl("stop", u)
+                paused = True
+                log("paused " + ", ".join(PAUSE_UNITS))
             for mac, s in spk.items():
                 if not connected(mac):
                     if time.time() >= next_try.get(mac, 0):
@@ -107,7 +118,10 @@ def main():
                     dbus.Interface(dev(mac), "org.bluez.Device1").Disconnect()
                 except dbus.DBusException:
                     pass
-            log(f"idle {IDLE_S}s: released {len(ours)} speaker(s)")
+            for u in PAUSE_UNITS:
+                systemctl("start", u)
+            paused = False
+            log(f"idle {IDLE_S}s: released {len(ours)} speaker(s), resumed " + ", ".join(PAUSE_UNITS))
             ours.clear()
             last_play = 0.0
         time.sleep(2)
