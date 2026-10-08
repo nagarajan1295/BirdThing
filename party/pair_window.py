@@ -42,10 +42,15 @@ def rssi(mac):
         time.sleep(0.5)
     return vals
 
+# Pairing must create a BOND (stored keys). A non-bondable adapter pairs, then
+# forgets the key, and the speaker refuses every later connection.
+ad_props = dbus.Interface(bus.get_object("org.bluez", ad_path), "org.freedesktop.DBus.Properties")
+ad_props.Set("org.bluez.Adapter1", "PairableTimeout", dbus.UInt32(0))
+ad_props.Set("org.bluez.Adapter1", "Pairable", dbus.Boolean(True))
 adapter.SetDiscoveryFilter({"Transport": dbus.String("bredr")})
 adapter.StartDiscovery()
 log(f"pairing window open for {MINUTES:g} min")
-tried, fails = set(), {}
+tried, retry_at = set(), {}
 end = time.time() + MINUTES * 60
 try:
     while time.time() < end:
@@ -53,7 +58,7 @@ try:
             p = ifs.get("org.bluez.Device1")
             if not p or not path.startswith(ad_path) or path in tried:
                 continue
-            if p.get("Paired") or not is_speaker(p):
+            if p.get("Paired") or not is_speaker(p) or time.time() < retry_at.get(path, 0):
                 continue
             mac, name = str(p["Address"]), str(p.get("Name", p.get("Alias", "?")))
             tried.add(path)
@@ -72,9 +77,8 @@ try:
             except dbus.DBusException as e:
                 log(f"  failed: {e.get_dbus_name()} {e.get_dbus_message()}")
                 samples = None
-                fails[path] = fails.get(path, 0) + 1
-                if fails[path] < 3:
-                    tried.discard(path)   # retry while it is still in pairing mode
+                tried.discard(path)       # keep retrying while it is in pairing mode
+                retry_at[path] = time.time() + 20
             data = load()
             data[mac] = dict(data.get(mac, {}), name=name, adv_rssi=int(p.get("RSSI", 0) or 0),
                              link_rssi=samples, paired_at=time.strftime("%Y-%m-%d %H:%M"))

@@ -1,12 +1,14 @@
 [Unit]
 Description=House Party snapclient for speaker %i
-After=bluealsa.service network-online.target
+After=bluealsa.service snapserver.service
 
 [Service]
-User=adithya
+User=_snapclient
 # instance = MAC without colons; hostID doubles as the snapcast client id so
-# per-speaker latency trims stick. 400 ms ALSA buffer rides out Bluetooth/WiFi
-# radio sharing on the Pi's combo chip (the cause of the crackle).
+# per-speaker latency trims stick. RT priority: the mini also runs Sentry's YOLO.
 ExecStart=/opt/party/client.sh %i
+Nice=-15
+CPUSchedulingPolicy=rr
+CPUSchedulingPriority=20
 Restart=on-failure
 RestartSec=3

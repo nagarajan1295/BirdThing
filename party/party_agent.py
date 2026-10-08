@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""House Party agent (runs as root on the bedroom Pi).
+"""House Party agent (runs as root on the Mac mini, next to snapserver).
 
 Watches the snapserver AirPlay stream. While it is playing, it connects every
 enabled speaker in /opt/party/speakers.json over Bluetooth and starts one
@@ -10,12 +10,11 @@ the Echoes are free again for the phone / follow-me audio when no party is on.
 import dbus, json, os, subprocess, time, urllib.request
 
 CONF = "/opt/party/speakers.json"
-RPC = "http://192.168.1.250:1780/jsonrpc"  # snapserver + AirPlay live on the living-room Pi
+RPC = os.environ.get("PARTY_RPC", "http://127.0.0.1:1780/jsonrpc")
 IDLE_S = 120
-# roomloc's continuous BLE discovery hogs the Pi's shared WiFi/BT radio; with
-# two A2DP streams on top, WiFi starves (snapclient TCP drops). Pause it while
-# a party plays - follow-me audio can't use the Echoes then anyway.
-PAUSE_UNITS = ["roomloc-node.service"]
+# Units to stop while a party plays (e.g. "roomloc-node.service" on a Pi whose
+# combo WiFi/BT chip can't afford continuous BLE discovery on top of A2DP).
+PAUSE_UNITS = os.environ.get("PARTY_PAUSE", "").split()
 RETRY_S = 20
 LOG = "/var/log/party-agent.log"
 
@@ -61,13 +60,17 @@ def connected(mac):
 
 
 def pcm_ready(mac):
-    """BlueALSA has an A2DP playback PCM for this speaker (i.e. the link is up as Pi->speaker)."""
-    try:
-        mgr = dbus.Interface(bus.get_object("org.bluealsa", "/org/bluealsa"), "org.bluealsa.Manager1")
-        tag = "dev_" + mac.replace(":", "_") + "/a2dpsrc"
-        return any(tag in str(path) for path in mgr.GetPCMs())
+    """BlueALSA has an A2DP playback PCM for this speaker (i.e. the link is up as host->speaker)."""
+    tag = "dev_" + mac.replace(":", "_") + "/a2dpsrc"
+    obj = bus.get_object("org.bluealsa", "/org/bluealsa")
+    try:      # BlueALSA >= 4.1 exposes PCMs through the ObjectManager
+        paths = dbus.Interface(obj, "org.freedesktop.DBus.ObjectManager").GetManagedObjects()
     except dbus.DBusException:
-        return False
+        try:  # 4.0 (Debian bookworm) had Manager1.GetPCMs
+            paths = dbus.Interface(obj, "org.bluealsa.Manager1").GetPCMs()
+        except dbus.DBusException:
+            return False
+    return any(tag in str(path) for path in paths)
 
 
 def unit(mac):
@@ -91,7 +94,7 @@ def main():
         spk = speakers()
         if playing():
             last_play = time.time()
-            if not paused:
+            if not paused and PAUSE_UNITS:
                 for u in PAUSE_UNITS:
                     systemctl("stop", u)
                 paused = True
